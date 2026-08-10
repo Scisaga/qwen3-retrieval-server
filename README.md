@@ -1,6 +1,6 @@
 # Qwen3-Embedding：自托管 Embedding 推理服务
 
-把 `Qwen/Qwen3-Embedding-8B` 封装成一个可自托管的 embedding 推理服务：
+把 `Qwen/Qwen3-Embedding-4B` 封装成一个可自托管的 embedding 推理服务：
 对外提供 OpenAI 兼容 Embeddings API、3D Projector API、HTTP MCP Server、内置调试控制台与 Projector 可视化页面，并附带 FastAPI 交互式接口文档，方便在内网/私有环境里快速接入与运维。
 
 项目地址：
@@ -57,7 +57,7 @@ client = OpenAI(
 )
 
 response = client.embeddings.create(
-    model="Qwen/Qwen3-Embedding-8B",
+    model="Qwen/Qwen3-Embedding-4B",
     input="What is the capital of China?",
     extra_body={
         "input_type": "query",
@@ -76,7 +76,7 @@ print(len(response.data[0].embedding))
 curl http://localhost:12302/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen3-Embedding-8B",
+    "model": "Qwen/Qwen3-Embedding-4B",
     "input": [
       "What is the capital of China?",
       "The capital of China is Beijing."
@@ -186,7 +186,7 @@ http://localhost:12302/v1/embeddings
 docker run -d --name qwen3_embedding_openai \
   --gpus all \
   -p 12302:12302 \
-  -e MODEL_ID="Qwen/Qwen3-Embedding-8B" \
+  -e MODEL_ID="Qwen/Qwen3-Embedding-4B" \
   -e HF_HOME="/models" \
   -v ./models:/models \
   ghcr.io/scisaga/qwen3-embedding-openai:latest
@@ -213,7 +213,7 @@ curl -X POST http://localhost:12302/admin/reload \
   -H "Content-Type: application/json" \
   -H "x-admin-token: change-me" \
   -d '{
-    "model_id":"Qwen/Qwen3-Embedding-8B",
+    "model_id":"Qwen/Qwen3-Embedding-4B",
     "max_model_len":4096,
     "gpu_memory_utilization":0.72
   }'
@@ -273,13 +273,12 @@ npm run build
 
 ## 常用环境变量
 在 `docker-compose.yml` 的 `environment` 里可调：
-- `MODEL_ID`：模型 ID，默认 `Qwen/Qwen3-Embedding-8B`
+- `MODEL_ID`：模型 ID，默认 `Qwen/Qwen3-Embedding-4B`
 - `PORT`：外层 FastAPI 端口，默认 `12302`
 - `BACKEND_HOST` / `BACKEND_PORT`：容器内 vLLM 监听地址
 - `HF_HOME`：模型缓存目录
 - `DTYPE`：模型精度，默认 `float16`
 - `MAX_MODEL_LEN`：最大上下文长度，默认 `4096`
-- `MAX_DIMENSIONS`：输出向量维度上限，默认 `4096`
 - `GPU_MEMORY_UTILIZATION`：vLLM 显存利用率，默认 `0.72`
 - `DEFAULT_QUERY_INSTRUCTION`：query 侧默认 instruction
 - `ADMIN_TOKEN`：热重载接口鉴权
@@ -290,6 +289,7 @@ npm run build
 - `PROJECTOR_CACHE_MAX_ITEMS`：Projector 缓存项上限
 
 注意：
+- 输出向量维度上限无需配置：服务会读取当前模型的 `config.json` 自动确定，并通过 `/health` 的 `max_dimensions` 返回（4B 为 `2560`）。热重载模型时也会重新解析。
 - 如果手动设置 `--max-num-batched-tokens`，它不能小于 `MAX_MODEL_LEN`；否则 vLLM 会在启动阶段报错退出。
 - 不建议使用 `VLLM_PORT` 作为 wrapper 配置名。该变量会与 vLLM 内部端口逻辑冲突，可能造成误导日志。
 

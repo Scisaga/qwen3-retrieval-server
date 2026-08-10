@@ -7,11 +7,13 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
+from huggingface_hub import hf_hub_download
 
-MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen3-Embedding-8B")
+MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen3-Embedding-4B")
 MODEL_REVISION = os.getenv("MODEL_REVISION")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "12302"))
@@ -20,7 +22,6 @@ BACKEND_PORT = int(os.getenv("BACKEND_PORT") or os.getenv("VLLM_PORT", "8001"))
 HF_HOME = os.getenv("HF_HOME", "/models")
 DTYPE = os.getenv("DTYPE", "float16")
 MAX_MODEL_LEN = int(os.getenv("MAX_MODEL_LEN", "4096"))
-MAX_DIMENSIONS = int(os.getenv("MAX_DIMENSIONS", "4096"))
 GPU_MEMORY_UTILIZATION = float(os.getenv("GPU_MEMORY_UTILIZATION", "0.72"))
 DEFAULT_QUERY_INSTRUCTION = os.getenv(
     "DEFAULT_QUERY_INSTRUCTION",
@@ -80,6 +81,7 @@ class BackendSettings:
     backend_port: int = BACKEND_PORT
     dtype: str = DTYPE
     max_model_len: int = MAX_MODEL_LEN
+    max_dimensions: Optional[int] = None
     gpu_memory_utilization: float = GPU_MEMORY_UTILIZATION
     default_query_instruction: str = DEFAULT_QUERY_INSTRUCTION
     hf_home: str = HF_HOME
@@ -104,6 +106,89 @@ class BackendReplica:
 
 
 _settings = BackendSettings()
+
+
+def _extract_max_dimensions(model_config: dict[str, Any]) -> int:
+    dimension_paths = (
+        ("sentence_embedding_dimension",),
+        ("embedding_dimension",),
+        ("projection_dim",),
+        ("text_config", "projection_dim"),
+        ("hidden_size",),
+        ("text_config", "hidden_size"),
+        ("d_model",),
+        ("text_config", "d_model"),
+    )
+    for path in dimension_paths:
+        value: Any = model_config
+        for key in path:
+            if not isinstance(value, dict) or key not in value:
+                break
+            value = value[key]
+        else:
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+
+    raise BackendUnavailableError(
+        "Model config does not expose a supported embedding dimension field "
+        "(sentence_embedding_dimension, embedding_dimension, projection_dim, hidden_size, or d_model)."
+    )
+
+
+def _load_model_config(model_id: str, model_revision: Optional[str], hf_home: str) -> dict[str, Any]:
+    local_config_path = Path(model_id).expanduser() / "config.json"
+    if local_config_path.is_file():
+        config_path = local_config_path
+    else:
+        download_args: dict[str, Any] = {
+            "repo_id": model_id,
+            "filename": "config.json",
+            "revision": model_revision,
+            "cache_dir": hf_home,
+        }
+        try:
+            config_path = Path(hf_hub_download(**download_args, local_files_only=True))
+        except Exception:
+            try:
+                config_path = Path(hf_hub_download(**download_args))
+            except Exception as exc:
+                raise BackendUnavailableError(
+                    f"Unable to load model config for {model_id!r}: {exc}"
+                ) from exc
+
+    try:
+        with config_path.open("r", encoding="utf-8") as config_file:
+            model_config = json.load(config_file)
+    except (OSError, ValueError) as exc:
+        raise BackendUnavailableError(
+            f"Unable to read model config for {model_id!r} from {config_path}: {exc}"
+        ) from exc
+    if not isinstance(model_config, dict):
+        raise BackendUnavailableError(f"Invalid model config for {model_id!r}: expected a JSON object.")
+    return model_config
+
+
+def resolve_model_max_dimensions(
+    model_id: str,
+    model_revision: Optional[str] = None,
+    hf_home: str = HF_HOME,
+) -> int:
+    return _extract_max_dimensions(_load_model_config(model_id, model_revision, hf_home))
+
+
+def _ensure_max_dimensions_locked() -> int:
+    if _settings.max_dimensions is None:
+        _settings.max_dimensions = resolve_model_max_dimensions(
+            _settings.model_id,
+            _settings.model_revision,
+            _settings.hf_home,
+        )
+    return _settings.max_dimensions
+
+
+def get_max_dimensions() -> int:
+    with _backend_lock:
+        return _ensure_max_dimensions_locked()
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -442,6 +527,7 @@ def _backend_message(
 def _start_backend_process_locked() -> None:
     global _backend_last_error
 
+    _ensure_max_dimensions_locked()
     if not _settings.manage_backend_process:
         return
 
@@ -705,8 +791,9 @@ def _validate_dimensions(dimensions: Optional[int]) -> Optional[int]:
         return None
     if not isinstance(dimensions, int):
         raise InputValidationError("`dimensions` must be an integer.")
-    if dimensions < 32 or dimensions > MAX_DIMENSIONS:
-        raise InputValidationError(f"`dimensions` must be between 32 and {MAX_DIMENSIONS}.")
+    max_dimensions = get_max_dimensions()
+    if dimensions < 32 or dimensions > max_dimensions:
+        raise InputValidationError(f"`dimensions` must be between 32 and {max_dimensions}.")
     return dimensions
 
 
@@ -964,6 +1051,7 @@ async def get_health_payload() -> dict[str, Any]:
         "backend_target_device": "cuda",
         "cpu_fallback": False,
         "max_model_len": _settings.max_model_len,
+        "max_dimensions": _settings.max_dimensions,
         "gpu_memory_utilization": _settings.gpu_memory_utilization,
         "default_query_instruction": _settings.default_query_instruction,
         "manage_backend_process": _settings.manage_backend_process,
@@ -1017,6 +1105,7 @@ def get_health_snapshot() -> dict[str, Any]:
         "backend_target_device": "cuda",
         "cpu_fallback": False,
         "max_model_len": _settings.max_model_len,
+        "max_dimensions": _settings.max_dimensions,
         "gpu_memory_utilization": _settings.gpu_memory_utilization,
         "default_query_instruction": _settings.default_query_instruction,
         "manage_backend_process": _settings.manage_backend_process,
@@ -1042,6 +1131,18 @@ async def reload_backend(new_config: dict[str, Any]) -> dict[str, Any]:
     if unknown:
         raise InputValidationError(f"Unsupported reload fields: {', '.join(sorted(unknown))}")
 
+    candidate_model_id = str(new_config.get("model_id") or _settings.model_id)
+    candidate_model_revision = (
+        new_config.get("model_revision") or None
+        if "model_revision" in new_config
+        else _settings.model_revision
+    )
+    candidate_max_dimensions = resolve_model_max_dimensions(
+        candidate_model_id,
+        candidate_model_revision,
+        _settings.hf_home,
+    )
+
     with _backend_lock:
         _stop_backend_process_locked()
 
@@ -1049,6 +1150,7 @@ async def reload_backend(new_config: dict[str, Any]) -> dict[str, Any]:
             _settings.model_id = str(new_config["model_id"])
         if "model_revision" in new_config:
             _settings.model_revision = new_config["model_revision"] or None
+        _settings.max_dimensions = candidate_max_dimensions
         if "dtype" in new_config and new_config["dtype"]:
             _settings.dtype = str(new_config["dtype"])
         if "max_model_len" in new_config and new_config["max_model_len"] is not None:

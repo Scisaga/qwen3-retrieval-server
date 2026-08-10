@@ -6,7 +6,7 @@ services:
     ports:
       - "12302:12302"
     environment:
-      MODEL_ID: "Qwen/Qwen3-Embedding-8B"
+      MODEL_ID: "Qwen/Qwen3-Embedding-4B"
       # MODEL_REVISION: "main"
       HOST: "0.0.0.0"
       PORT: "12302"
@@ -15,9 +15,8 @@ services:
       TZ: "Asia/Shanghai"
       HF_HOME: "/models"
       DTYPE: "float16"
-      # Qwen3-Embedding-8B 在 RTX 2080 Ti (22GB, Turing) 上使用更保守的默认值
+      # Qwen3-Embedding-4B 在 RTX 2080 Ti (22GB, Turing) 上使用更保守的默认值
       MAX_MODEL_LEN: "8192"
-      MAX_DIMENSIONS: "4096"
       GPU_MEMORY_UTILIZATION: "0.72"
       PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
       DEFAULT_QUERY_INSTRUCTION: "Given a web search query, retrieve relevant passages that answer the query"
@@ -48,5 +47,5 @@ services:
             - driver: nvidia
               # 选卡：宿主机第 1 张卡写 "0"，第 2 张卡写 "1"
               # 如果这里写 ["0","1"]，默认会在两张卡上各起 1 个 vLLM 实例并支持并发推理
-              device_ids: ["1"]
+              device_ids: ["0"]
               capabilities: [gpu]

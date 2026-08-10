@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from embedding_service import (
     ADMIN_TOKEN,
     DEFAULT_QUERY_INSTRUCTION,
-    MAX_DIMENSIONS,
     BackendProxyError,
     BackendUnavailableError,
     InputValidationError,
@@ -32,7 +31,7 @@ class EmbeddingsRequest(BaseModel):
 
     input: str | list[str]
     model: Optional[str] = None
-    dimensions: Optional[int] = Field(default=None, ge=32, le=MAX_DIMENSIONS)
+    dimensions: Optional[int] = Field(default=None, ge=32)
     encoding_format: Optional[str] = None
     user: Optional[str] = None
     input_type: Optional[Literal["query", "document"]] = None
@@ -851,7 +850,7 @@ def _build_index_html() -> str:
                   </div>
                   <div>
                     <label for="dimensions">Dimensions</label>
-                    <input id="dimensions" type="number" min="32" max="__MAX_DIMENSIONS__" placeholder="例如 1024"/>
+                    <input id="dimensions" type="number" min="32" placeholder="例如 1024（上限随模型）"/>
                   </div>
                 </div>
 
@@ -1014,7 +1013,7 @@ def _build_index_html() -> str:
                 <div class="row">
                   <div>
                     <label for="reloadModelId">Model ID</label>
-                    <input id="reloadModelId" placeholder="Qwen/Qwen3-Embedding-8B"/>
+                    <input id="reloadModelId" placeholder="Qwen/Qwen3-Embedding-4B"/>
                   </div>
                   <div>
                     <label for="reloadToken">x-admin-token</label>
@@ -1519,6 +1518,13 @@ def _build_index_html() -> str:
         els.sidebarDevice.textContent = payload.backend_target_device || "cuda";
         els.sidebarDtype.textContent = payload.dtype || "-";
         els.metricState.textContent = payload.backend_state || "-";
+        if (Number.isInteger(payload.max_dimensions) && payload.max_dimensions > 0) {
+          els.dimensions.max = String(payload.max_dimensions);
+          els.dimensions.title = `当前模型最大输出维度：${payload.max_dimensions}`;
+        } else {
+          els.dimensions.removeAttribute("max");
+          els.dimensions.title = "输出维度上限会从当前模型配置自动读取";
+        }
         const message = payload.backend_last_error || `Backend ${payload.backend_state || "unknown"}`;
         if (payload.backend_ready) {
           clearError();
@@ -1680,7 +1686,6 @@ def _build_index_html() -> str:
     return (
         template.replace("__MODEL_ID__", get_current_model_id())
         .replace("__DEFAULT_INSTRUCTION__", DEFAULT_QUERY_INSTRUCTION)
-        .replace("__MAX_DIMENSIONS__", str(MAX_DIMENSIONS))
     )
 
 

@@ -27,7 +27,7 @@ def build_usage_resource_content() -> str:
         "- `texts` (required): one string or a list of strings",
         "- `input_type` (optional): `query` or `document`",
         "- `instruction` (optional): query-side instruction for Qwen retrieval formatting",
-        "- `dimensions` (optional): output dimensions between 32 and 4096",
+        "- `dimensions` (optional): output dimensions between 32 and the current model's `max_dimensions` from health",
         "",
         "Tool: project_texts",
         "- `texts` (required): one string or a list of strings",

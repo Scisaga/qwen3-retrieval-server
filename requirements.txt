@@ -1,5 +1,6 @@
 fastapi==0.115.8
 httpx==0.28.1
+huggingface-hub>=0.33,<1.0
 mcp>=1.0.0,<2.0.0
 numpy==2.2.3
 pytest==8.3.5

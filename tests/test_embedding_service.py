@@ -9,6 +9,19 @@ class _CompletedProcess:
         self.stdout = stdout
 
 
+@pytest.fixture(autouse=True)
+def _configured_model_dimensions(monkeypatch):
+    monkeypatch.setattr(embedding_service._settings, "max_dimensions", 2560)
+
+
+def test_extract_max_dimensions_from_qwen_hidden_size():
+    assert embedding_service._extract_max_dimensions({"hidden_size": 2560}) == 2560
+
+
+def test_extract_max_dimensions_prefers_projection_dimension():
+    assert embedding_service._extract_max_dimensions({"projection_dim": 1024, "hidden_size": 2560}) == 1024
+
+
 def test_prepare_backend_payload_for_single_document():
     payload = embedding_service.prepare_backend_payload(
         {
@@ -50,6 +63,9 @@ def test_prepare_backend_payload_for_query_uses_custom_instruction():
 def test_prepare_backend_payload_rejects_invalid_dimensions():
     with pytest.raises(embedding_service.InputValidationError):
         embedding_service.prepare_backend_payload({"input": "hello", "dimensions": 31})
+
+    with pytest.raises(embedding_service.InputValidationError, match="2560"):
+        embedding_service.prepare_backend_payload({"input": "hello", "dimensions": 2561})
 
 
 def test_prepare_backend_payload_rejects_invalid_input_type():
@@ -116,7 +132,7 @@ def test_validate_backend_settings_rejects_batched_tokens_smaller_than_max_model
 
 
 def test_build_vllm_command_auto_enables_qwen3_matryoshka(monkeypatch):
-    monkeypatch.setattr(embedding_service._settings, "model_id", "Qwen/Qwen3-Embedding-8B")
+    monkeypatch.setattr(embedding_service._settings, "model_id", "Qwen/Qwen3-Embedding-4B")
     monkeypatch.setattr(embedding_service._settings, "extra_args", "--enforce-eager")
 
     command = embedding_service._build_vllm_command()
@@ -127,7 +143,7 @@ def test_build_vllm_command_auto_enables_qwen3_matryoshka(monkeypatch):
 
 
 def test_build_vllm_command_does_not_duplicate_existing_hf_overrides(monkeypatch):
-    monkeypatch.setattr(embedding_service._settings, "model_id", "Qwen/Qwen3-Embedding-8B")
+    monkeypatch.setattr(embedding_service._settings, "model_id", "Qwen/Qwen3-Embedding-4B")
     monkeypatch.setattr(
         embedding_service._settings,
         "extra_args",
@@ -197,6 +213,27 @@ def test_ordered_backend_candidates_round_robin_ready_replicas(monkeypatch):
 
     assert [replica.replica_index for replica in first] == [0, 1]
     assert [replica.replica_index for replica in second] == [1, 0]
+
+
+@pytest.mark.anyio
+async def test_reload_backend_refreshes_model_max_dimensions(monkeypatch):
+    async def fake_wait_for_backend_ready(timeout_s=None):
+        return None
+
+    async def fake_get_health_payload():
+        return {"model_id": embedding_service._settings.model_id, "max_dimensions": 1024}
+
+    monkeypatch.setattr(embedding_service._settings, "model_id", "Qwen/Qwen3-Embedding-4B")
+    monkeypatch.setattr(embedding_service, "resolve_model_max_dimensions", lambda *args: 1024)
+    monkeypatch.setattr(embedding_service, "_stop_backend_process_locked", lambda: None)
+    monkeypatch.setattr(embedding_service, "_start_backend_process_locked", lambda: None)
+    monkeypatch.setattr(embedding_service, "wait_for_backend_ready", fake_wait_for_backend_ready)
+    monkeypatch.setattr(embedding_service, "get_health_payload", fake_get_health_payload)
+
+    payload = await embedding_service.reload_backend({"model_id": "Qwen/Qwen3-Embedding-0.6B"})
+
+    assert embedding_service._settings.max_dimensions == 1024
+    assert payload["max_dimensions"] == 1024
 
 
 @pytest.mark.anyio

@@ -28,7 +28,7 @@ async def test_embed_text_impl_success(monkeypatch):
     mocked = AsyncMock(
         return_value={
             "object": "list",
-            "model": "Qwen/Qwen3-Embedding-8B",
+            "model": "Qwen/Qwen3-Embedding-4B",
             "data": [{"index": 0, "embedding": [0.1, 0.2]}],
         }
     )

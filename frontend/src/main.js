@@ -81,7 +81,7 @@ Shanghai is a major financial center in China.</textarea>
             </label>
             <label class="projector-field" for="projectorModel">
               <span class="projector-label">Model（可选）</span>
-              <input id="projectorModel" placeholder="Qwen/Qwen3-Embedding-8B" />
+              <input id="projectorModel" placeholder="Qwen/Qwen3-Embedding-4B" />
             </label>
           </div>
 

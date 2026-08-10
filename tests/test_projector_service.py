@@ -42,7 +42,7 @@ async def test_create_projector_payload_cache_hit():
         counter["calls"] += 1
         return {
             "object": "list",
-            "model": "Qwen/Qwen3-Embedding-8B",
+            "model": "Qwen/Qwen3-Embedding-4B",
             "data": [
                 {"index": 0, "object": "embedding", "embedding": [0.1, 0.2, 0.3]},
                 {"index": 1, "object": "embedding", "embedding": [0.2, 0.1, 0.4]},
@@ -71,7 +71,7 @@ async def test_create_projector_payload_contains_neighbors_and_points():
     async def fake_embedder(payload):
         return {
             "object": "list",
-            "model": "Qwen/Qwen3-Embedding-8B",
+            "model": "Qwen/Qwen3-Embedding-4B",
             "data": [
                 {"index": 0, "object": "embedding", "embedding": [1.0, 0.0, 0.0]},
                 {"index": 1, "object": "embedding", "embedding": [0.9, 0.1, 0.0]},
