@@ -10,6 +10,7 @@ import mcp_server
 
 def test_usage_resource_includes_projector_tool():
     content = mcp_server.build_usage_resource_content()
+    assert content.startswith("# Qwen3 Retrieval MCP Usage")
     assert "embed_text" in content
     assert "project_texts" in content
     assert "projection_method" in content

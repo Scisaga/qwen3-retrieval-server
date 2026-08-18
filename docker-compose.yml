@@ -1,7 +1,10 @@
+name: qwen3-retrieval-server
+
 services:
-  qwen3_embedding:
+  qwen3_retrieval:
     build: .
-    container_name: qwen3_embedding_openai
+    image: qwen3-retrieval-server:local
+    container_name: qwen3_retrieval_server
     restart: unless-stopped
     ports:
       - "12302:12302"
@@ -38,6 +41,8 @@ services:
       RERANKER_FALLBACK_GPU_MEMORY_UTILIZATION: "0.085"
       RERANKER_QUANTIZED_GPU_MEMORY_UTILIZATION: "0.06"
       RERANKER_START_TIMEOUT: "300"
+      # 共享 GPU 上其他进程在 vLLM profiling 期间释放显存时，按同配置重试一次。
+      RERANKER_PRELOAD_RETRY_DELAY: "5"
       # FP16 峰值超过 2 GiB；4-bit 在 0.0121 质量下降上限内通过发布门禁。
       RERANKER_QUANTIZATION: "bitsandbytes"
       RERANKER_PRELOAD: "1"

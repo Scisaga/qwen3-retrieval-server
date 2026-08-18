@@ -20,7 +20,7 @@ def build_health_resource_content() -> str:
 
 def build_usage_resource_content() -> str:
     lines = [
-        "# Qwen3 Embedding & Reranker MCP Usage",
+        "# Qwen3 Retrieval MCP Usage",
         "",
         "Use `embed_text` for retrieval embeddings, `rerank_documents` for second-stage ranking, and `project_texts` for projector payloads.",
         "",
@@ -133,7 +133,7 @@ async def rerank_documents_impl(
 
 
 def create_mcp_server() -> FastMCP:
-    mcp = FastMCP("Qwen3 Embedding & Reranker", stateless_http=True, json_response=True)
+    mcp = FastMCP("Qwen3 Retrieval", stateless_http=True, json_response=True)
     mcp.settings.streamable_http_path = "/"
 
     @mcp.tool()
@@ -183,14 +183,25 @@ def create_mcp_server() -> FastMCP:
         """Rerank 1-50 candidate documents with the local Qwen3 Reranker."""
         return await rerank_documents_impl(query=query, documents=documents, top_n=top_n)
 
-    @mcp.resource("qwen3embedding://health")
-    def qwen3embedding_health() -> str:
+    @mcp.resource("qwen3retrieval://health")
+    def qwen3retrieval_health() -> str:
         """Expose read-only runtime status for MCP clients."""
         return build_health_resource_content()
 
+    @mcp.resource("qwen3retrieval://usage")
+    def qwen3retrieval_usage() -> str:
+        """Describe how to call the retrieval tools safely."""
+        return build_usage_resource_content()
+
+    # Compatibility aliases for clients configured before the project rename.
+    @mcp.resource("qwen3embedding://health")
+    def legacy_qwen3embedding_health() -> str:
+        """Deprecated alias of qwen3retrieval://health."""
+        return build_health_resource_content()
+
     @mcp.resource("qwen3embedding://usage")
-    def qwen3embedding_usage() -> str:
-        """Describe how to call the embedding tool safely."""
+    def legacy_qwen3embedding_usage() -> str:
+        """Deprecated alias of qwen3retrieval://usage."""
         return build_usage_resource_content()
 
     @mcp.prompt()

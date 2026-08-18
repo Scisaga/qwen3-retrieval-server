@@ -62,11 +62,20 @@ async def test_health_status_is_degraded_until_both_backends_are_ready(monkeypat
 def test_index_html_contains_unified_navigation_and_projector_mount():
     html = app._build_index_html()
 
+    assert "<title>Qwen3 Retrieval</title>" in html
+    assert '<div class="brand-title">Qwen3 Retrieval</div>' in html
+    assert '<div class="nav-group-label">工作台</div>' in html
+    assert '<div class="nav-group-label">分析工具</div>' in html
+    assert '<div class="nav-group-label">系统</div>' in html
+    assert 'class="nav-link" data-tab="results-section"' not in html
+    assert 'class="section-tab" data-tab="results-section"' in html
+    assert '<span>健康检查</span>' not in html
     assert 'data-tab="projector-section"' in html
     assert 'id="projector-root"' in html
     assert 'href="/projector-static/projector.css"' in html
     assert 'import("/projector-static/projector.js")' in html
     assert 'id="activeViewLabel"' in html
+    assert 'id="activeViewGroup"' in html
     assert 'id="similarityHeatmap"' in html
     assert 'class="payload-details"' in html
     assert 'id="topTimeChip"' not in html
@@ -75,6 +84,16 @@ def test_index_html_contains_unified_navigation_and_projector_mount():
     assert 'data-tab="reranker-section"' in html
     assert 'id="rerankQuery"' in html
     assert 'id="rerankerReloadBtn"' in html
+    assert 'reranker.model || "Qwen/Qwen3-Reranker-0.6B"' in html
+    assert 'id="adminEmbeddingBadge"' in html
+    assert 'id="adminRerankerBadge"' in html
+
+
+def test_application_metadata_uses_product_name():
+    application = app.create_application()
+
+    assert application.title == "Qwen3 Retrieval"
+    assert "Embedding and Reranker" in application.description
 
 
 def test_projector_page_redirects_to_embedded_tab():

@@ -1,5 +1,5 @@
 {
-  "name": "qwen3-embedding-projector",
+  "name": "qwen3-retrieval-projector",
   "private": true,
   "version": "0.1.0",
   "type": "module",

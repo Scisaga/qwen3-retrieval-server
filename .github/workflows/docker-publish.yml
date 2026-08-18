@@ -1,4 +1,4 @@
-name: docker-publish
+name: publish-qwen3-retrieval
 
 on:
   push:
@@ -36,7 +36,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: |
+            ghcr.io/${{ github.repository_owner }}/qwen3-retrieval-server
+            ghcr.io/${{ github.repository_owner }}/qwen3-embedding-openai
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch

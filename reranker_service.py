@@ -35,6 +35,7 @@ RERANKER_HTTP_TIMEOUT = float(os.getenv("RERANKER_HTTP_TIMEOUT", "120"))
 RERANKER_START_TIMEOUT = int(os.getenv("RERANKER_START_TIMEOUT", "600"))
 RERANKER_POLL_INTERVAL = float(os.getenv("RERANKER_POLL_INTERVAL", "1"))
 RERANKER_REQUEST_READY_TIMEOUT = float(os.getenv("RERANKER_REQUEST_READY_TIMEOUT", "3"))
+RERANKER_PRELOAD_RETRY_DELAY = float(os.getenv("RERANKER_PRELOAD_RETRY_DELAY", "5"))
 RERANKER_PRELOAD = os.getenv("RERANKER_PRELOAD", "1").strip().lower() not in (
     "0",
     "false",
@@ -280,9 +281,14 @@ async def maybe_preload_reranker() -> None:
         attempts.append((RERANKER_FALLBACK_GPU_MEMORY_UTILIZATION, "none"))
     if _settings.quantization == "none" and RERANKER_AUTO_FALLBACK_4BIT:
         attempts.append((RERANKER_QUANTIZED_GPU_MEMORY_UTILIZATION, "bitsandbytes"))
+    # vLLM's startup profiler aborts if another process on the shared GPU
+    # releases memory during its profiling window. Retrying the final,
+    # publishable configuration after cleanup makes cold starts resilient to
+    # that transient without changing memory, context, or concurrency limits.
+    attempts.append(attempts[-1])
 
     _fallback_attempts.clear()
-    for gpu_utilization, quantization in attempts:
+    for attempt_index, (gpu_utilization, quantization) in enumerate(attempts):
         _settings.gpu_memory_utilization = gpu_utilization
         _settings.quantization = quantization
         _fallback_attempts.append(
@@ -295,6 +301,14 @@ async def maybe_preload_reranker() -> None:
             _last_error = str(exc)
             with _lock:
                 _stop_locked()
+            next_attempt = attempts[attempt_index + 1] if attempt_index + 1 < len(attempts) else None
+            if next_attempt == (gpu_utilization, quantization) and RERANKER_PRELOAD_RETRY_DELAY > 0:
+                print(
+                    "[reranker] preload attempt failed; retrying the same configuration "
+                    f"after {RERANKER_PRELOAD_RETRY_DELAY:g}s: {_last_error}",
+                    flush=True,
+                )
+                await asyncio.sleep(RERANKER_PRELOAD_RETRY_DELAY)
 
 
 async def shutdown_reranker() -> None:

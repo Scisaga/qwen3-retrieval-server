@@ -172,7 +172,7 @@ def tokenish_document(words: int, marker: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:12302")
-    parser.add_argument("--container", default="qwen3_embedding_openai")
+    parser.add_argument("--container", default="qwen3_retrieval_server")
     parser.add_argument("--gpu-index", type=int, default=0)
     parser.add_argument("--interval", type=float, default=0.1)
     parser.add_argument("--idle-seconds", type=float, default=5)

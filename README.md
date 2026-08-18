@@ -1,15 +1,13 @@
-# Qwen3 Embedding & Reranker：自托管检索推理服务
+# Qwen3 Retrieval
 
-在一个应用容器内管理两个相互独立的 vLLM 0.19.1 后端：`Qwen/Qwen3-Embedding-4B`
+自托管的 Qwen3 检索推理服务。在一个应用容器内管理两个相互独立的 vLLM 0.19.1 后端：`Qwen/Qwen3-Embedding-4B`
 负责第一阶段向量召回，`Qwen/Qwen3-Reranker-0.6B` 负责第二阶段精排。默认两者只使用
 GPU 0，公共入口仍为 `:12302`；项目不包含向量库、切块或生成编排。
 
 项目地址：
-- 代码仓库：[`https://github.com/Scisaga/qwen3-embedding-openai`](https://github.com/Scisaga/qwen3-embedding-openai)
-- 镜像仓库（GHCR）：`ghcr.io/scisaga/qwen3-embedding-openai:latest`
-
-![Embedding 调试台](img/README-1784748312813.png)
-![Projector 可视化](img/README-1784748365784.png)
+- 代码仓库：[`https://github.com/Scisaga/qwen3-retrieval-server`](https://github.com/Scisaga/qwen3-retrieval-server)
+- 镜像仓库（GHCR）：`ghcr.io/scisaga/qwen3-retrieval-server:latest`
+- 兼容镜像名：`ghcr.io/scisaga/qwen3-embedding-openai:latest`（迁移期保留）
 
 ## 功能
 - OpenAI 兼容 Embeddings API：`POST /v1/embeddings`
@@ -17,9 +15,9 @@ GPU 0，公共入口仍为 `:12302`；项目不包含向量库、切块或生成
 - 3D Projector API：`POST /v1/embeddings/projector`（后端预计算 3D 投影 + 近邻）
 - Qwen 检索增强字段：`input_type=query|document`、`instruction`
 - MCP Server：HTTP 挂载到 `POST/GET /mcp`，提供 embedding、rerank 与 projector 工具
-- 内置 Web UI：`GET /`（Embedding、Reranker、结果分析、Projector、运维管理）
-- 调试台结果可视化：直接展示余弦相似度热力图与首个向量的维度采样轮廓
-- Projector 视图：`GET /#projector-section`（3D 点云、原点连线、箭头、坐标轴、近邻联动）；`GET /projector` 保留为兼容跳转
+- 内置 Web UI：`GET /`，按“工作台 / 分析工具 / 系统”组织 Embedding、Reranker、向量投影和服务管理
+- Embedding 内部结果分析：直接展示余弦相似度热力图、首个向量的维度采样轮廓与原始响应
+- 向量投影：`GET /#projector-section`（3D 点云、原点连线、箭头、坐标轴、近邻联动）；`GET /projector` 保留为兼容跳转
 - 交互式接口文档：`GET /docs`（Swagger UI）与 `GET /redoc`
 - 模型自动下载与缓存：将 `./models` 挂载到容器 `/models`（Hugging Face 缓存目录）
 - 独立生命周期：先加载 Embedding、再加载 Reranker；Reranker 失败时 Embedding 继续服务，聚合健康为 `degraded`
@@ -171,8 +169,9 @@ http://localhost:12302/mcp
   - 返回：按分数降序的 vLLM Rerank 响应
 
 ### Resources
-- `qwen3embedding://health`：Embedding 顶层状态与嵌套 Reranker 状态
-- `qwen3embedding://usage`：MCP 工具参数说明与使用建议
+- `qwen3retrieval://health`：Embedding 顶层状态与嵌套 Reranker 状态
+- `qwen3retrieval://usage`：MCP 工具参数说明与使用建议
+- `qwen3embedding://health` / `qwen3embedding://usage`：项目改名前的兼容别名
 
 ### Prompts
 - `retrieval_embedding_workflow`：指导客户端如何区分 query/document，并在 query 侧传入 instruction
@@ -227,7 +226,8 @@ http://localhost:12302/v1/rerank
   - push `v*` 标签
   - `pull_request` 到 `main`（仅构建，不推送）
   - 手动触发 `workflow_dispatch`
-- 镜像仓库：`ghcr.io/<owner>/<repo>`
+- 主镜像仓库：`ghcr.io/<owner>/qwen3-retrieval-server`
+- 迁移期同时发布旧镜像名 `ghcr.io/<owner>/qwen3-embedding-openai`
 - 标签策略：`latest`（默认分支）、分支名、tag 名、commit sha
 
 首次使用时请确保：
@@ -238,13 +238,13 @@ http://localhost:12302/v1/rerank
 
 ## Docker 部署示例
 ```bash
-docker run -d --name qwen3_embedding_openai \
+docker run -d --name qwen3_retrieval_server \
   --gpus '"device=0"' \
   -p 12302:12302 \
   -e MODEL_ID="Qwen/Qwen3-Embedding-4B" \
   -e HF_HOME="/models" \
   -v ./models:/models \
-  ghcr.io/scisaga/qwen3-embedding-openai:latest
+  ghcr.io/scisaga/qwen3-retrieval-server:latest
 ```
 
 如果你绕过本仓库、直接调用原生 `vllm serve` 启动 `Qwen3-Embedding-*`，请显式追加：
@@ -342,6 +342,7 @@ npm run build
 - `RERANKER_FALLBACK_GPU_MEMORY_UTILIZATION`：仅 FP16 启动失败时尝试 `0.085`
 - `RERANKER_QUANTIZED_GPU_MEMORY_UTILIZATION`：BitsAndBytes 4-bit 使用 `0.06`，保留 2048-token 上下文和单序列调度
 - `RERANKER_QUANTIZATION`：`none` 或 `bitsandbytes`
+- `RERANKER_PRELOAD_RETRY_DELAY`：冷启动 profiling 竞态后的同配置重试等待秒数，Compose 为 `5`
 
 注意：
 - 输出向量维度上限无需配置：服务会读取当前模型的 `config.json` 自动确定，并通过 `/health` 的 `max_dimensions` 返回（4B 为 `2560`）。热重载模型时也会重新解析。
@@ -354,7 +355,7 @@ python -m pytest
 python -m compileall -q app.py embedding_service.py reranker_service.py service_health.py mcp_server.py projector_service.py
 cd frontend && npm install && npm run build
 docker compose config --quiet
-docker build -t qwen3-embedding-openai:reranker-candidate .
+docker build -t qwen3-retrieval-server:reranker-candidate .
 ```
 
 ## 显存与量化验收
@@ -365,7 +366,7 @@ Reranker 的 2 GiB 门槛定义为：根 PID 及其全部 GPU 子进程在 NVML 
 
 ```bash
 python scripts/measure_reranker_vram.py \
-  --container qwen3_embedding_openai \
+  --container qwen3_retrieval_server \
   --base-url http://127.0.0.1:12302 \
   --gpu-index 0
 ```

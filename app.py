@@ -131,7 +131,7 @@ def _build_index_html() -> str:
   <link rel="icon" type="image/png" href="/static/logo.png"/>
   <link rel="apple-touch-icon" href="/static/logo.png"/>
   <link rel="stylesheet" href="/projector-static/projector.css"/>
-  <title>Qwen3 Embedding &amp; Reranker</title>
+  <title>Qwen3 Retrieval</title>
   <style>
     :root{
       --bg0:#050913;
@@ -432,6 +432,16 @@ def _build_index_html() -> str:
     .brand-title{font-size:16px;font-weight:700}
     .brand-sub{font-size:12px;color:var(--muted2);margin-top:2px}
     .nav{margin-top:6px;display:flex;flex-direction:column;gap:6px}
+    .nav-group{display:flex;flex-direction:column;gap:4px}
+    .nav-group + .nav-group{margin-top:14px}
+    .nav-group-label{
+      padding:0 12px 5px;
+      color:var(--muted2);
+      font-size:10px;
+      font-weight:700;
+      letter-spacing:.14em;
+      text-transform:uppercase;
+    }
     .nav .nav-link{
       display:flex;
       align-items:center;
@@ -468,6 +478,7 @@ def _build_index_html() -> str:
     }
     .nav .icon{color:var(--muted2);opacity:.78}
     .nav .nav-link.active .icon{color:var(--accent);opacity:.98}
+    .nav .nav-link .external-mark{margin-left:auto;color:var(--muted2);font-size:12px}
     .sidebar-footer{
       margin-top:18px;
       padding:12px;
@@ -475,7 +486,15 @@ def _build_index_html() -> str:
       border-radius:var(--radius);
       background:rgba(15,23,42,.45);
     }
-    .sidebar-footer .kv{display:flex;justify-content:space-between;gap:10px;padding:6px 0}
+    .sidebar-status-title{margin-bottom:8px;color:var(--muted2);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+    .service-status-row{display:grid;grid-template-columns:8px 68px minmax(0,1fr);align-items:center;gap:8px;padding:6px 0}
+    .service-status-dot{width:7px;height:7px;border-radius:999px;background:var(--muted2)}
+    .service-status-dot.ready{background:var(--good);box-shadow:0 0 0 3px rgba(34,197,94,.11)}
+    .service-status-dot.starting{background:var(--warn);box-shadow:0 0 0 3px rgba(245,158,11,.11)}
+    .service-status-dot.error{background:var(--danger);box-shadow:0 0 0 3px rgba(239,68,68,.11)}
+    .service-status-name{font-size:12px;color:var(--text)}
+    .service-status-meta{min-width:0;overflow:hidden;color:var(--muted);font-size:11px;text-align:right;text-overflow:ellipsis;white-space:nowrap}
+    .sidebar-footer .kv{display:flex;justify-content:space-between;gap:10px;margin-top:5px;padding:8px 0 2px;border-top:1px solid var(--border)}
     .sidebar-footer .k{color:var(--muted2);font-size:12px}
     .sidebar-footer .v{
       max-width:142px;
@@ -515,6 +534,13 @@ def _build_index_html() -> str:
     .section-head{margin:2px 0 12px}
     .section-head h1,.section-head h2{margin:0;font-size:22px;letter-spacing:.2px}
     .section-head p{margin:8px 0 0;color:var(--muted);font-size:13px;line-height:1.7}
+    .section-tabs{display:inline-flex;gap:4px;margin:0 0 12px;padding:4px;border:1px solid var(--border);border-radius:7px;background:rgba(2,6,23,.38)}
+    .section-tab{padding:7px 12px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--muted);font:600 12px/1 inherit;cursor:pointer}
+    .section-tab.active{border-color:rgba(255,138,31,.24);background:rgba(255,138,31,.11);color:var(--text)}
+    .service-overview{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+    .service-badge.ready{color:#bbf7d0;border-color:rgba(34,197,94,.26);background:rgba(34,197,94,.12)}
+    .service-badge.starting{color:#fde68a;border-color:rgba(245,158,11,.28);background:rgba(245,158,11,.12)}
+    .service-badge.error{color:#fecaca;border-color:rgba(239,68,68,.26);background:rgba(239,68,68,.12)}
     .grid{grid-template-columns:1.12fr .88fr;gap:10px}
     .grid-2{gap:10px}
     .card{
@@ -748,7 +774,7 @@ def _build_index_html() -> str:
         cursor:pointer;
       }
       .mobile-tab.active{border-color:rgba(255,138,31,.24);background:rgba(255,138,31,.11);color:var(--text)}
-      .grid,.grid-2,.row,.row-3,.kv-grid{grid-template-columns:1fr}
+      .grid,.grid-2,.row,.row-3,.kv-grid,.service-overview{grid-template-columns:1fr}
       .section,.section.projector-section{max-width:none}
     }
     @media (max-width:640px){
@@ -774,6 +800,9 @@ def _build_index_html() -> str:
     <symbol id="i-results" viewBox="0 0 24 24">
       <path d="M5 19V9M12 19V5M19 19v-7M3 19h18"/>
     </symbol>
+    <symbol id="i-rerank" viewBox="0 0 24 24">
+      <path d="M5 7h10M5 12h7M5 17h4M17 11v8M14 16l3 3 3-3"/>
+    </symbol>
     <symbol id="i-projector" viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="2"/><circle cx="5" cy="7" r="1.5"/><circle cx="18" cy="5" r="1.5"/><circle cx="19" cy="18" r="1.5"/>
       <path d="M7 8l3.5 3M13.5 10.5L17 6.5M13.5 13.5l4 3.5"/>
@@ -798,61 +827,75 @@ def _build_index_html() -> str:
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <img class="logo" src="/static/logo.png" alt="Qwen3 Embedding and Reranker"/>
+        <img class="logo" src="/static/logo.png" alt="Qwen3 Retrieval"/>
         <div>
-          <div class="brand-title">Qwen3 Embedding &amp; Reranker</div>
-          <div class="brand-sub">Self-hosted Debug Console</div>
+          <div class="brand-title">Qwen3 Retrieval</div>
+          <div class="brand-sub">自托管检索控制台</div>
         </div>
       </div>
 
       <nav class="nav" aria-label="主导航">
-        <button type="button" class="nav-link active" data-tab="debug-section"><svg class="icon" aria-hidden="true"><use href="#i-embed"></use></svg><span>调试台</span></button>
-        <button type="button" class="nav-link" data-tab="reranker-section"><svg class="icon" aria-hidden="true"><use href="#i-results"></use></svg><span>Reranker</span></button>
-        <button type="button" class="nav-link" data-tab="results-section"><svg class="icon" aria-hidden="true"><use href="#i-results"></use></svg><span>结果分析</span></button>
-        <button type="button" class="nav-link" data-tab="projector-section"><svg class="icon" aria-hidden="true"><use href="#i-projector"></use></svg><span>Projector 视图</span></button>
-        <button type="button" class="nav-link" data-tab="admin-section"><svg class="icon" aria-hidden="true"><use href="#i-admin"></use></svg><span>运维管理</span></button>
-        <a class="nav-link" href="/docs" target="_blank" rel="noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-doc"></use></svg><span>API 文档</span></a>
-        <a class="nav-link" href="/health" target="_blank" rel="noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-health"></use></svg><span>健康检查</span></a>
+        <div class="nav-group">
+          <div class="nav-group-label">工作台</div>
+          <button type="button" class="nav-link active" data-tab="debug-section"><svg class="icon" aria-hidden="true"><use href="#i-embed"></use></svg><span>Embedding</span></button>
+          <button type="button" class="nav-link" data-tab="reranker-section"><svg class="icon" aria-hidden="true"><use href="#i-rerank"></use></svg><span>Reranker</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">分析工具</div>
+          <button type="button" class="nav-link" data-tab="projector-section"><svg class="icon" aria-hidden="true"><use href="#i-projector"></use></svg><span>向量投影</span></button>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-label">系统</div>
+          <button type="button" class="nav-link" data-tab="admin-section"><svg class="icon" aria-hidden="true"><use href="#i-admin"></use></svg><span>服务与模型</span></button>
+          <a class="nav-link" href="/docs" target="_blank" rel="noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-doc"></use></svg><span>API 文档</span><span class="external-mark">↗</span></a>
+        </div>
       </nav>
 
       <div class="sidebar-footer" aria-label="运行信息">
-        <div class="kv"><span class="k">Endpoint</span><span class="v">/v1/embeddings</span></div>
-        <div class="kv"><span class="k">Rerank</span><span class="v">/v1/rerank</span></div>
-        <div class="kv"><span class="k">MCP</span><span class="v">/mcp</span></div>
-        <div class="kv"><span class="k">Model</span><span class="v" id="sidebarModel">__MODEL_ID__</span></div>
+        <div class="sidebar-status-title">运行状态</div>
+        <div class="service-status-row">
+          <span class="service-status-dot starting" id="sidebarEmbeddingState" aria-hidden="true"></span>
+          <span class="service-status-name">Embedding</span>
+          <span class="service-status-meta" id="sidebarEmbeddingMeta">checking</span>
+        </div>
+        <div class="service-status-row">
+          <span class="service-status-dot starting" id="sidebarRerankerState" aria-hidden="true"></span>
+          <span class="service-status-name">Reranker</span>
+          <span class="service-status-meta" id="sidebarRerankerMeta">checking</span>
+        </div>
         <div class="kv"><span class="k">Device</span><span class="v" id="sidebarDevice">cuda</span></div>
-        <div class="kv"><span class="k">DType</span><span class="v" id="sidebarDtype">—</span></div>
       </div>
     </aside>
 
     <main class="main">
       <header class="topbar">
-        <div class="crumbs"><span class="muted2">Services</span><span class="sep">/</span><strong id="activeViewLabel">Embedding 调试台</strong></div>
+        <div class="crumbs"><span class="muted2" id="activeViewGroup">工作台</span><span class="sep">/</span><strong id="activeViewLabel">Embedding</strong></div>
         <div class="top-actions">
           <div class="chips">
             <span class="chip optional" id="topModelChip">Model: __MODEL_ID__</span>
             <span class="chip warn" id="topStatusChip">Backend: checking</span>
             <span class="chip optional" id="topDeviceChip">Target: CUDA</span>
           </div>
-          <a class="btn ghost" href="/docs" target="_blank" rel="noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-doc"></use></svg><span>Docs</span></a>
-          <a class="btn ghost" href="/redoc" target="_blank" rel="noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-doc"></use></svg><span>Redoc</span></a>
         </div>
       </header>
 
       <div class="content">
         <nav class="mobile-nav" aria-label="移动端导航">
-          <button type="button" class="mobile-tab active" data-tab="debug-section"><svg class="icon" aria-hidden="true"><use href="#i-embed"></use></svg>调试台</button>
-          <button type="button" class="mobile-tab" data-tab="reranker-section"><svg class="icon" aria-hidden="true"><use href="#i-results"></use></svg>Rerank</button>
-          <button type="button" class="mobile-tab" data-tab="results-section"><svg class="icon" aria-hidden="true"><use href="#i-results"></use></svg>结果</button>
-          <button type="button" class="mobile-tab" data-tab="projector-section"><svg class="icon" aria-hidden="true"><use href="#i-projector"></use></svg>Projector</button>
-          <button type="button" class="mobile-tab" data-tab="admin-section"><svg class="icon" aria-hidden="true"><use href="#i-admin"></use></svg>运维</button>
+          <button type="button" class="mobile-tab active" data-tab="debug-section"><svg class="icon" aria-hidden="true"><use href="#i-embed"></use></svg>Embedding</button>
+          <button type="button" class="mobile-tab" data-tab="reranker-section"><svg class="icon" aria-hidden="true"><use href="#i-rerank"></use></svg>Reranker</button>
+          <button type="button" class="mobile-tab" data-tab="projector-section"><svg class="icon" aria-hidden="true"><use href="#i-projector"></use></svg>向量投影</button>
+          <button type="button" class="mobile-tab" data-tab="admin-section"><svg class="icon" aria-hidden="true"><use href="#i-admin"></use></svg>服务</button>
         </nav>
 
         <section class="section active tab-panel" id="debug-section">
           <div class="section-head">
-            <h1>Embedding 调试台</h1>
+            <h1>Embedding</h1>
             <p>生成与检查文本向量，查看运行状态，并通过模板、向量下载和相似度矩阵完成接入调试。</p>
           </div>
+          <nav class="section-tabs" aria-label="Embedding 视图">
+            <button type="button" class="section-tab active" data-tab="debug-section">请求调试</button>
+            <button type="button" class="section-tab" data-tab="results-section">结果分析</button>
+          </nav>
 
           <div class="grid">
             <section class="card">
@@ -975,7 +1018,7 @@ def _build_index_html() -> str:
 
         <section class="section tab-panel" id="reranker-section">
           <div class="section-head">
-            <h2>Reranker 调试台</h2>
+            <h2>Reranker</h2>
             <p>对第一阶段召回的候选文档进行精排。每行一篇文档，最多 50 篇；instruction 与模板固定在服务端。</p>
           </div>
           <div class="grid">
@@ -1016,6 +1059,14 @@ def _build_index_html() -> str:
         </section>
 
         <section class="section tab-panel" id="results-section">
+          <div class="section-head">
+            <h2>Embedding 结果分析</h2>
+            <p>查看最近一次 Embedding 请求的向量摘要、相似度矩阵和原始响应。</p>
+          </div>
+          <nav class="section-tabs" aria-label="Embedding 视图">
+            <button type="button" class="section-tab" data-tab="debug-section">请求调试</button>
+            <button type="button" class="section-tab active" data-tab="results-section">结果分析</button>
+          </nav>
           <div class="grid">
             <section class="card">
               <div class="card-body">
@@ -1077,7 +1128,7 @@ def _build_index_html() -> str:
 
         <section class="section projector-section tab-panel" id="projector-section">
           <div class="section-head">
-            <h2>Embedding Projector</h2>
+            <h2>向量投影</h2>
             <p>在三维空间中观察文本向量分布，并联动检查选中点、最近邻和投影元数据。</p>
           </div>
           <div id="projector-root">
@@ -1089,6 +1140,40 @@ def _build_index_html() -> str:
         </section>
 
         <section class="section tab-panel" id="admin-section">
+          <div class="section-head">
+            <h2>服务与模型</h2>
+            <p>集中查看两个独立后端的健康状态、运行参数和热重载入口。</p>
+          </div>
+          <div class="service-overview">
+            <section class="card">
+              <div class="card-body">
+                <div class="card-title">
+                  <div><h3>Embedding 后端</h3><p>第一阶段向量召回 · 内部端口 8001</p></div>
+                  <span class="pill service-badge starting" id="adminEmbeddingBadge">checking</span>
+                </div>
+                <div class="kv-grid">
+                  <div class="kv-item"><span>模型</span><strong id="adminEmbeddingModel">__MODEL_ID__</strong></div>
+                  <div class="kv-item"><span>精度</span><strong id="adminEmbeddingPrecision">—</strong></div>
+                  <div class="kv-item"><span>状态</span><strong id="adminEmbeddingState">—</strong></div>
+                  <div class="kv-item"><span>PID</span><strong id="adminEmbeddingPid">—</strong></div>
+                </div>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-body">
+                <div class="card-title">
+                  <div><h3>Reranker 后端</h3><p>第二阶段候选精排 · 内部端口 8002</p></div>
+                  <span class="pill service-badge starting" id="adminRerankerBadge">checking</span>
+                </div>
+                <div class="kv-grid">
+                  <div class="kv-item"><span>模型</span><strong id="adminRerankerModel">__RERANKER_MODEL_ID__</strong></div>
+                  <div class="kv-item"><span>精度</span><strong id="adminRerankerPrecision">—</strong></div>
+                  <div class="kv-item"><span>状态</span><strong id="adminRerankerState">—</strong></div>
+                  <div class="kv-item"><span>PID</span><strong id="adminRerankerPid">—</strong></div>
+                </div>
+              </div>
+            </section>
+          </div>
           <div class="grid">
             <section class="card">
               <div class="card-body">
@@ -1180,13 +1265,13 @@ def _build_index_html() -> str:
                 <div class="card-title">
                   <div>
                     <h3>接口说明</h3>
-                    <p>当前页面只是内置调试台，正式接入仍建议直接调用 API。</p>
+                    <p>Web 控制台用于调试与运维，正式接入仍建议直接调用 API。</p>
                   </div>
                 </div>
                 <ul class="api-list">
                   <li><code>POST /v1/embeddings</code><p>OpenAI 兼容 Embeddings 接口</p></li>
                   <li><code>POST /v1/rerank</code><p>vLLM 兼容的二阶段文档精排接口</p></li>
-                  <li><code>POST /v1/embeddings/projector</code><p>后端预计算 3D 投影 + 近邻，供 Projector 视图渲染</p></li>
+                  <li><code>POST /v1/embeddings/projector</code><p>后端预计算 3D 投影 + 近邻，供向量投影视图渲染</p></li>
                   <li><code>GET /</code><p>内置调试页面</p></li>
                   <li><code>GET /projector</code><p>兼容入口，跳转到主页 Projector 页签</p></li>
                   <li><code>POST/GET /mcp</code><p>MCP Streamable HTTP 入口</p></li>
@@ -1207,6 +1292,7 @@ def _build_index_html() -> str:
     let lastHealthPayload = null;
     let lastEmbeddingPayload = null;
     let lastRerankPayload = null;
+    let currentViewId = "debug-section";
 
     const templates = {
       blank: {
@@ -1287,10 +1373,23 @@ def _build_index_html() -> str:
       topModelChip: document.getElementById("topModelChip"),
       topStatusChip: document.getElementById("topStatusChip"),
       topDeviceChip: document.getElementById("topDeviceChip"),
+      activeViewGroup: document.getElementById("activeViewGroup"),
       activeViewLabel: document.getElementById("activeViewLabel"),
-      sidebarModel: document.getElementById("sidebarModel"),
+      sidebarEmbeddingState: document.getElementById("sidebarEmbeddingState"),
+      sidebarEmbeddingMeta: document.getElementById("sidebarEmbeddingMeta"),
+      sidebarRerankerState: document.getElementById("sidebarRerankerState"),
+      sidebarRerankerMeta: document.getElementById("sidebarRerankerMeta"),
       sidebarDevice: document.getElementById("sidebarDevice"),
-      sidebarDtype: document.getElementById("sidebarDtype"),
+      adminEmbeddingBadge: document.getElementById("adminEmbeddingBadge"),
+      adminEmbeddingModel: document.getElementById("adminEmbeddingModel"),
+      adminEmbeddingPrecision: document.getElementById("adminEmbeddingPrecision"),
+      adminEmbeddingState: document.getElementById("adminEmbeddingState"),
+      adminEmbeddingPid: document.getElementById("adminEmbeddingPid"),
+      adminRerankerBadge: document.getElementById("adminRerankerBadge"),
+      adminRerankerModel: document.getElementById("adminRerankerModel"),
+      adminRerankerPrecision: document.getElementById("adminRerankerPrecision"),
+      adminRerankerState: document.getElementById("adminRerankerState"),
+      adminRerankerPid: document.getElementById("adminRerankerPid"),
       healthModelChip: document.getElementById("healthModelChip"),
       healthDeviceChip: document.getElementById("healthDeviceChip"),
       reloadModelId: document.getElementById("reloadModelId"),
@@ -1316,12 +1415,12 @@ def _build_index_html() -> str:
     };
     const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
     const tabControls = Array.from(document.querySelectorAll("[data-tab]"));
-    const viewLabels = {
-      "debug-section": "Embedding 调试台",
-      "reranker-section": "Reranker 调试台",
-      "results-section": "结果分析",
-      "projector-section": "Embedding Projector",
-      "admin-section": "运维管理",
+    const viewMeta = {
+      "debug-section": {group: "工作台", label: "Embedding", backend: "embedding"},
+      "reranker-section": {group: "工作台", label: "Reranker", backend: "reranker"},
+      "results-section": {group: "工作台 · Embedding", label: "结果分析", backend: "embedding"},
+      "projector-section": {group: "分析工具", label: "向量投影", backend: "embedding"},
+      "admin-section": {group: "系统", label: "服务与模型", backend: "all"},
     };
     let projectorModulePromise = null;
     let projectorMounted = false;
@@ -1353,18 +1452,86 @@ def _build_index_html() -> str:
       }
     }
 
+    function compactModelName(modelId, kind) {
+      const name = String(modelId || "-").split("/").pop();
+      if (kind === "embedding") return name.replace(/^Qwen3-Embedding-/, "");
+      if (kind === "reranker") return name.replace(/^Qwen3-Reranker-/, "");
+      return name;
+    }
+
+    function precisionLabel(dtype, quantization) {
+      if (quantization === "bitsandbytes") return "4-bit";
+      if (dtype === "float16") return "FP16";
+      return String(dtype || "-").toUpperCase();
+    }
+
+    function updateBackendSummary(dot, meta, backend, kind) {
+      const ready = Boolean(kind === "embedding" ? backend.backend_ready : backend.ready);
+      const state = String(kind === "embedding" ? backend.backend_state || "unknown" : backend.state || "unknown");
+      dot.classList.remove("ready", "starting", "error");
+      dot.classList.add(ready ? "ready" : state === "starting" ? "starting" : "error");
+      dot.title = ready ? "ready" : state;
+      if (!ready) {
+        meta.textContent = state;
+        return;
+      }
+      const modelId = kind === "embedding" ? backend.model_id : backend.model;
+      meta.textContent = `${compactModelName(modelId, kind)} · ${precisionLabel(backend.dtype, backend.quantization)}`;
+      meta.title = modelId || "";
+    }
+
+    function updateServiceOverview(payload) {
+      const reranker = payload.reranker || {};
+      const updateBadge = (badge, ready, state) => {
+        const normalizedState = String(state || "unknown");
+        badge.classList.remove("ready", "starting", "error");
+        badge.classList.add(ready ? "ready" : normalizedState === "starting" ? "starting" : "error");
+        badge.textContent = ready ? "ready" : normalizedState;
+      };
+      updateBadge(els.adminEmbeddingBadge, Boolean(payload.backend_ready), payload.backend_state);
+      updateBadge(els.adminRerankerBadge, Boolean(reranker.ready), reranker.state);
+      els.adminEmbeddingModel.textContent = payload.model_id || "-";
+      els.adminEmbeddingPrecision.textContent = precisionLabel(payload.dtype, null);
+      els.adminEmbeddingState.textContent = payload.backend_state || "-";
+      els.adminEmbeddingPid.textContent = payload.backend_pid ?? "-";
+      els.adminRerankerModel.textContent = reranker.model || "-";
+      els.adminRerankerPrecision.textContent = precisionLabel(reranker.dtype, reranker.quantization);
+      els.adminRerankerState.textContent = reranker.state || "-";
+      els.adminRerankerPid.textContent = reranker.pid ?? "-";
+    }
+
+    function updateViewContext() {
+      const payload = lastHealthPayload || {};
+      const reranker = payload.reranker || {};
+      const meta = viewMeta[currentViewId] || viewMeta["debug-section"];
+      if (meta.backend === "reranker") {
+        els.topModelChip.textContent = `Model: ${reranker.model || "__RERANKER_MODEL_ID__"}`;
+      } else if (meta.backend === "all") {
+        els.topModelChip.textContent = "Backends: Embedding + Reranker";
+      } else {
+        els.topModelChip.textContent = `Model: ${payload.model_id || "__MODEL_ID__"}`;
+      }
+      els.topDeviceChip.textContent = `Target: ${payload.backend_target_device || "cuda"}`;
+    }
+
     function setActiveTab(tabId, syncHash = true) {
       const targetId = tabPanels.some(panel => panel.id === tabId) ? tabId : "debug-section";
+      const navigationTarget = targetId === "results-section" ? "debug-section" : targetId;
+      currentViewId = targetId;
 
       tabPanels.forEach((panel) => {
         panel.classList.toggle("active", panel.id === targetId);
       });
       tabControls.forEach((control) => {
-        const isActive = control.dataset.tab === targetId;
+        const isPrimaryNavigation = control.classList.contains("nav-link") || control.classList.contains("mobile-tab");
+        const isActive = control.dataset.tab === targetId || (isPrimaryNavigation && control.dataset.tab === navigationTarget);
         control.classList.toggle("active", isActive);
         control.setAttribute("aria-current", isActive ? "page" : "false");
       });
-      els.activeViewLabel.textContent = viewLabels[targetId] || "Qwen3 Embedding & Reranker";
+      const meta = viewMeta[targetId] || viewMeta["debug-section"];
+      els.activeViewGroup.textContent = meta.group;
+      els.activeViewLabel.textContent = meta.label;
+      updateViewContext();
 
       if (targetId === "projector-section") {
         void ensureProjectorMounted();
@@ -1644,11 +1811,7 @@ def _build_index_html() -> str:
         els.healthOut.textContent = JSON.stringify(payload, null, 2);
         els.healthModelChip.textContent = payload.model_id || "-";
         els.healthDeviceChip.textContent = payload.backend_target_device || "cuda";
-        els.topModelChip.textContent = `Model: ${payload.model_id || "-"}`;
-        els.topDeviceChip.textContent = `Target: ${payload.backend_target_device || "cuda"}`;
-        els.sidebarModel.textContent = payload.model_id || "-";
         els.sidebarDevice.textContent = payload.backend_target_device || "cuda";
-        els.sidebarDtype.textContent = payload.dtype || "-";
         els.metricState.textContent = payload.backend_state || "-";
         if (Number.isInteger(payload.max_dimensions) && payload.max_dimensions > 0) {
           els.dimensions.max = String(payload.max_dimensions);
@@ -1658,6 +1821,10 @@ def _build_index_html() -> str:
           els.dimensions.title = "输出维度上限会从当前模型配置自动读取";
         }
         const reranker = payload.reranker || {};
+        updateBackendSummary(els.sidebarEmbeddingState, els.sidebarEmbeddingMeta, payload, "embedding");
+        updateBackendSummary(els.sidebarRerankerState, els.sidebarRerankerMeta, reranker, "reranker");
+        updateServiceOverview(payload);
+        updateViewContext();
         if (reranker.quantization) els.rerankerQuantization.value = reranker.quantization;
         const message = payload.backend_last_error || reranker.last_error || `Backend ${payload.backend_state || "unknown"}`;
         if (payload.backend_ready && reranker.ready) {
@@ -1943,7 +2110,11 @@ def create_application() -> FastAPI:
                 await shutdown_reranker()
                 await shutdown_backend()
 
-    app = FastAPI(title="Qwen3 Embedding & Reranker", lifespan=lifespan)
+    app = FastAPI(
+        title="Qwen3 Retrieval",
+        description="Self-hosted Qwen3 Embedding and Reranker inference server.",
+        lifespan=lifespan,
+    )
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error(_, exc: RequestValidationError) -> JSONResponse:

@@ -152,11 +152,44 @@ async def test_preload_uses_quantized_memory_limit_for_4bit_fallback(monkeypatch
 
     monkeypatch.setattr(reranker_service, "ensure_reranker_started", capture_attempt)
     monkeypatch.setattr(reranker_service, "_stop_locked", lambda: None)
+    monkeypatch.setattr(reranker_service, "RERANKER_PRELOAD_RETRY_DELAY", 0)
 
     await reranker_service.maybe_preload_reranker()
 
     assert attempts == [
         (0.08, "none"),
         (reranker_service.RERANKER_FALLBACK_GPU_MEMORY_UTILIZATION, "none"),
+        (reranker_service.RERANKER_QUANTIZED_GPU_MEMORY_UTILIZATION, "bitsandbytes"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_preload_retries_configured_4bit_after_transient_failure(monkeypatch):
+    attempts = []
+
+    async def capture_attempt(*_, **__):
+        attempts.append(
+            (
+                reranker_service._settings.gpu_memory_utilization,
+                reranker_service._settings.quantization,
+            )
+        )
+        if len(attempts) == 1:
+            raise reranker_service.BackendUnavailableError("transient profiling race")
+
+    monkeypatch.setattr(reranker_service._settings, "quantization", "bitsandbytes")
+    monkeypatch.setattr(
+        reranker_service._settings,
+        "gpu_memory_utilization",
+        reranker_service.RERANKER_QUANTIZED_GPU_MEMORY_UTILIZATION,
+    )
+    monkeypatch.setattr(reranker_service, "ensure_reranker_started", capture_attempt)
+    monkeypatch.setattr(reranker_service, "_stop_locked", lambda: None)
+    monkeypatch.setattr(reranker_service, "RERANKER_PRELOAD_RETRY_DELAY", 0)
+
+    await reranker_service.maybe_preload_reranker()
+
+    assert attempts == [
+        (reranker_service.RERANKER_QUANTIZED_GPU_MEMORY_UTILIZATION, "bitsandbytes"),
         (reranker_service.RERANKER_QUANTIZED_GPU_MEMORY_UTILIZATION, "bitsandbytes"),
     ]

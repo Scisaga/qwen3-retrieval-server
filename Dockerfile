@@ -12,6 +12,10 @@ FROM vllm/vllm-openai:v0.19.1
 
 ENV TZ=Asia/Shanghai
 
+LABEL org.opencontainers.image.title="Qwen3 Retrieval" \
+      org.opencontainers.image.description="Self-hosted Qwen3 Embedding and Reranker server" \
+      org.opencontainers.image.source="https://github.com/Scisaga/qwen3-retrieval-server"
+
 WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
