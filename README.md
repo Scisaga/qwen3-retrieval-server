@@ -7,7 +7,14 @@ GPU 0，公共入口仍为 `:12302`；项目不包含向量库、切块或生成
 项目地址：
 - 代码仓库：[`https://github.com/Scisaga/qwen3-retrieval-server`](https://github.com/Scisaga/qwen3-retrieval-server)
 - 镜像仓库（GHCR）：`ghcr.io/scisaga/qwen3-retrieval-server:latest`
-- 兼容镜像名：`ghcr.io/scisaga/qwen3-embedding-openai:latest`（迁移期保留）
+
+## 界面预览
+
+![Embedding 工作台](img/qwen3-retrieval-embedding.png)
+
+![Reranker 工作台](img/qwen3-retrieval-reranker.png)
+
+![服务与模型](img/qwen3-retrieval-services.png)
 
 ## 功能
 - OpenAI 兼容 Embeddings API：`POST /v1/embeddings`
@@ -227,7 +234,6 @@ http://localhost:12302/v1/rerank
   - `pull_request` 到 `main`（仅构建，不推送）
   - 手动触发 `workflow_dispatch`
 - 主镜像仓库：`ghcr.io/<owner>/qwen3-retrieval-server`
-- 迁移期同时发布旧镜像名 `ghcr.io/<owner>/qwen3-embedding-openai`
 - 标签策略：`latest`（默认分支）、分支名、tag 名、commit sha
 
 首次使用时请确保：
