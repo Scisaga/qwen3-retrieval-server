@@ -10,18 +10,19 @@ from embedding_service import (
     DEFAULT_QUERY_INSTRUCTION,
     InputValidationError,
     embed_texts,
-    get_health_snapshot,
 )
+from reranker_service import rerank_documents as rerank_documents_service
+from service_health import get_aggregate_health_snapshot
 
 def build_health_resource_content() -> str:
-    return json.dumps(get_health_snapshot(), ensure_ascii=False, indent=2)
+    return json.dumps(get_aggregate_health_snapshot(), ensure_ascii=False, indent=2)
 
 
 def build_usage_resource_content() -> str:
     lines = [
-        "# Qwen3-Embedding MCP Usage",
+        "# Qwen3 Embedding & Reranker MCP Usage",
         "",
-        "Use `embed_text` to generate embeddings and `project_texts` to build projector payloads.",
+        "Use `embed_text` for retrieval embeddings, `rerank_documents` for second-stage ranking, and `project_texts` for projector payloads.",
         "",
         "Tool: embed_text",
         "- `texts` (required): one string or a list of strings",
@@ -37,6 +38,12 @@ def build_usage_resource_content() -> str:
         "- `neighbors_k` (optional): 1-256",
         "- `point_size` (optional): (0, 64]",
         "- `input_type` / `instruction` are also supported for retrieval-style query/document encoding",
+        "",
+        "Tool: rerank_documents",
+        "- `query` (required): one non-empty query string",
+        "- `documents` (required): 1-50 non-empty strings",
+        "- `top_n` (optional): return the best 1..len(documents) results; omit to return all",
+        "- The instruction and Qwen3 score template are fixed at service level.",
         "",
         "Notes:",
         "- Query embeddings are wrapped as `Instruct: ...\\nQuery:...` before being sent to Qwen.",
@@ -108,8 +115,25 @@ async def project_texts_impl(
         raise RuntimeError(f"backend_error: {exc}") from exc
 
 
+async def rerank_documents_impl(
+    query: str,
+    documents: list[str],
+    top_n: Optional[int] = None,
+) -> dict:
+    try:
+        return await rerank_documents_service(query=query, documents=documents, top_n=top_n)
+    except InputValidationError as exc:
+        raise RuntimeError(f"invalid_input: {exc}") from exc
+    except BackendUnavailableError as exc:
+        raise RuntimeError(f"backend_unavailable: {exc}") from exc
+    except BackendProxyError as exc:
+        if exc.payload is not None:
+            raise RuntimeError(json.dumps(exc.payload, ensure_ascii=False)) from exc
+        raise RuntimeError(f"backend_error: {exc}") from exc
+
+
 def create_mcp_server() -> FastMCP:
-    mcp = FastMCP("Qwen3-Embedding", stateless_http=True, json_response=True)
+    mcp = FastMCP("Qwen3 Embedding & Reranker", stateless_http=True, json_response=True)
     mcp.settings.streamable_http_path = "/"
 
     @mcp.tool()
@@ -150,6 +174,15 @@ def create_mcp_server() -> FastMCP:
             point_size=point_size,
         )
 
+    @mcp.tool()
+    async def rerank_documents(
+        query: str,
+        documents: list[str],
+        top_n: Optional[int] = None,
+    ) -> dict:
+        """Rerank 1-50 candidate documents with the local Qwen3 Reranker."""
+        return await rerank_documents_impl(query=query, documents=documents, top_n=top_n)
+
     @mcp.resource("qwen3embedding://health")
     def qwen3embedding_health() -> str:
         """Expose read-only runtime status for MCP clients."""
@@ -168,6 +201,16 @@ def create_mcp_server() -> FastMCP:
             "Pass a task-specific English `instruction` whenever possible. "
             "When embedding passages or chunks for indexing, use `input_type=document` and do not add the instruction. "
             "Keep query and document embeddings in separate requests."
+        )
+
+    @mcp.prompt()
+    def rag_retrieval_workflow() -> str:
+        """Guide clients through two-stage RAG retrieval."""
+        return (
+            "For two-stage RAG retrieval, first call `embed_text` with `input_type=query` and use the resulting "
+            "vector to retrieve a broad candidate set from the client's vector store. Then pass the original query "
+            "and up to 50 candidate passage strings to `rerank_documents`; use `top_n` to keep only the passages "
+            "sent to generation. Preserve each result's original `index` when mapping it back to candidate metadata."
         )
 
     @mcp.prompt()

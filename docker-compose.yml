@@ -17,26 +17,40 @@ services:
       DTYPE: "float16"
       # Qwen3-Embedding-4B 在 RTX 2080 Ti (22GB, Turing) 上使用更保守的默认值
       MAX_MODEL_LEN: "8192"
-      GPU_MEMORY_UTILIZATION: "0.72"
+      # vLLM 0.19.1 treats this as a reservation target. 0.47 retains the
+      # 8192-token KV cache while leaving room for ASR and the capped Reranker.
+      GPU_MEMORY_UTILIZATION: "0.47"
       PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
       DEFAULT_QUERY_INSTRUCTION: "Given a web search query, retrieve relevant passages that answer the query"
       PROJECTOR_CACHE_TTL_SECONDS: "300"
       PROJECTOR_CACHE_MAX_ITEMS: "32"
       PRELOAD_MODEL: "1"
+      AUTO_BACKEND_REPLICAS: "0"
+      RERANKER_MODEL_ID: "Qwen/Qwen3-Reranker-0.6B"
+      # RERANKER_MODEL_REVISION: "main"
+      RERANKER_BACKEND_HOST: "127.0.0.1"
+      RERANKER_BACKEND_PORT: "8002"
+      RERANKER_DTYPE: "float16"
+      RERANKER_MAX_MODEL_LEN: "2048"
+      # FP16 先按计划使用 0.08；仅启动失败时尝试 0.085。
+      # BitsAndBytes 单独收紧到 GPU 0 实测通过 2 GiB 门槛的 0.06。
+      RERANKER_GPU_MEMORY_UTILIZATION: "0.08"
+      RERANKER_FALLBACK_GPU_MEMORY_UTILIZATION: "0.085"
+      RERANKER_QUANTIZED_GPU_MEMORY_UTILIZATION: "0.06"
+      RERANKER_START_TIMEOUT: "300"
+      # FP16 峰值超过 2 GiB；4-bit 在 0.0121 质量下降上限内通过发布门禁。
+      RERANKER_QUANTIZATION: "bitsandbytes"
+      RERANKER_PRELOAD: "1"
+      RERANKER_AUTO_FALLBACK_4BIT: "1"
       ADMIN_TOKEN: "change-me"
       HTTP_PROXY: ${HTTP_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1}
-      # 默认行为：
-      # - 当容器可见多张 GPU 且未显式设置 tensor/pipeline parallel 时，
-      #   wrapper 会按“每张卡 1 个 vLLM 实例”启动，并在外层做轮询分发
-      # - 如果你只想保留单实例，可设置 AUTO_BACKEND_REPLICAS=0
-      # - 如果你明确要让单个 vLLM 实例跨卡切模型，再手动追加 --tensor-parallel-size / --pipeline-parallel-size
+      # 容器只暴露 GPU 0；Embedding 与 Reranker 各一个独立 vLLM 进程。
       # 2080 Ti / Turing 上优先避免长时间卡在 startup：
       # - --enforce-eager: 关闭 CUDA graph
-      # - --disable-frontend-multiprocessing: 降低前后端分离复杂度
       # - --max-num-seqs / --max-num-batched-tokens: 缩小调度窗口，但 batched tokens 不能小于 max_model_len
       # - --hf_overrides '{"is_matryoshka": true}': 让 Qwen3-Embedding-* 在 vLLM 中正确接受 dimensions 参数
-      VLLM_EXTRA_ARGS: "--enforce-eager --disable-frontend-multiprocessing --max-num-seqs 24 --max-num-batched-tokens 16384 --disable-custom-all-reduce --hf_overrides '{\"is_matryoshka\": true}'"
+      VLLM_EXTRA_ARGS: "--enforce-eager --max-num-seqs 24 --max-num-batched-tokens 16384 --disable-custom-all-reduce --hf-overrides '{\"is_matryoshka\": true}'"
     volumes:
       - ./models:/models
     ipc: host
@@ -45,7 +59,6 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              # 选卡：宿主机第 1 张卡写 "0"，第 2 张卡写 "1"
-              # 如果这里写 ["0","1"]，默认会在两张卡上各起 1 个 vLLM 实例并支持并发推理
+              # GPU 1 保留给其他用途，禁止在此处增加。
               device_ids: ["0"]
               capabilities: [gpu]

@@ -1,7 +1,8 @@
-# Qwen3-Embedding：自托管 Embedding 推理服务
+# Qwen3 Embedding & Reranker：自托管检索推理服务
 
-把 `Qwen/Qwen3-Embedding-4B` 封装成一个可自托管的 embedding 推理服务：
-对外提供 OpenAI 兼容 Embeddings API、3D Projector API、HTTP MCP Server、内置调试控制台与 Projector 可视化页面，并附带 FastAPI 交互式接口文档，方便在内网/私有环境里快速接入与运维。
+在一个应用容器内管理两个相互独立的 vLLM 0.19.1 后端：`Qwen/Qwen3-Embedding-4B`
+负责第一阶段向量召回，`Qwen/Qwen3-Reranker-0.6B` 负责第二阶段精排。默认两者只使用
+GPU 0，公共入口仍为 `:12302`；项目不包含向量库、切块或生成编排。
 
 项目地址：
 - 代码仓库：[`https://github.com/Scisaga/qwen3-embedding-openai`](https://github.com/Scisaga/qwen3-embedding-openai)
@@ -12,15 +13,17 @@
 
 ## 功能
 - OpenAI 兼容 Embeddings API：`POST /v1/embeddings`
+- vLLM 兼容 Rerank API：`POST /v1/rerank`（1–50 篇纯文本文档）
 - 3D Projector API：`POST /v1/embeddings/projector`（后端预计算 3D 投影 + 近邻）
 - Qwen 检索增强字段：`input_type=query|document`、`instruction`
-- MCP Server：HTTP 挂载到 `POST/GET /mcp`（Streamable HTTP）
-- 内置 Web UI：`GET /`（调试台、结果分析、Projector、运维管理）
+- MCP Server：HTTP 挂载到 `POST/GET /mcp`，提供 embedding、rerank 与 projector 工具
+- 内置 Web UI：`GET /`（Embedding、Reranker、结果分析、Projector、运维管理）
 - 调试台结果可视化：直接展示余弦相似度热力图与首个向量的维度采样轮廓
 - Projector 视图：`GET /#projector-section`（3D 点云、原点连线、箭头、坐标轴、近邻联动）；`GET /projector` 保留为兼容跳转
 - 交互式接口文档：`GET /docs`（Swagger UI）与 `GET /redoc`
 - 模型自动下载与缓存：将 `./models` 挂载到容器 `/models`（Hugging Face 缓存目录）
-- 运维友好：健康检查 `GET /health`；可选热重载 `POST /admin/reload`（`ADMIN_TOKEN` 保护）
+- 独立生命周期：先加载 Embedding、再加载 Reranker；Reranker 失败时 Embedding 继续服务，聚合健康为 `degraded`
+- 运维友好：`GET /health` 保留 Embedding 顶层字段，并增加 `reranker`；两个后端可独立热重载
 - GitHub Actions：自动构建并发布 Docker 镜像到 GHCR（`.github/workflows/docker-publish.yml`）
 
 ## 快速开始
@@ -28,7 +31,8 @@
 docker compose up -d --build
 ```
 
-说明：仓库默认会为 `Qwen3-Embedding-*` 注入 vLLM 的 `hf_overrides={"is_matryoshka": true}`，避免旧版本 vLLM 误判 Qwen3 不支持自定义 `dimensions`。
+说明：Embedding 使用 `--runner pooling --convert embed` 和 Matryoshka override；Reranker 使用
+`--runner pooling --convert classify`、项目内固化的官方 Qwen3 模板和固定检索 instruction。
 
 如果机器需要走代理才能访问 Hugging Face，可在同目录创建 `.env`（或启动前导出环境变量）：
 
@@ -69,6 +73,24 @@ response = client.embeddings.create(
 print(len(response.data[0].embedding))
 ```
 
+Rerank 尚不是 OpenAI SDK 的标准资源，可直接使用 `httpx`：
+
+```python
+import httpx
+
+response = httpx.post(
+    "http://localhost:12302/v1/rerank",
+    json={
+        "query": "中国的首都是哪里？",
+        "documents": ["巴黎是法国首都。", "北京是中国首都。"],
+        "top_n": 1,
+    },
+    timeout=120,
+)
+response.raise_for_status()
+print(response.json()["results"][0])
+```
+
 ## curl 示例
 
 ### Embeddings
@@ -86,6 +108,25 @@ curl http://localhost:12302/v1/embeddings \
     "dimensions": 1024
   }'
 ```
+
+### Reranker
+
+```bash
+curl http://localhost:12302/v1/rerank \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What is the capital of China?",
+    "documents": [
+      "Paris is the capital of France.",
+      "Beijing is the capital of China.",
+      "Python uses indentation for blocks."
+    ],
+    "top_n": 2
+  }'
+```
+
+响应按 `relevance_score` 降序排列，每项保留输入数组的原始 `index` 和 `document.text`。
+省略 `top_n` 时返回全部结果。请求级 instruction、模板、优先级与截断参数均不开放。
 
 ### Projector
 ```bash
@@ -125,25 +166,32 @@ http://localhost:12302/mcp
 - `project_texts`
   - 入参：`texts`（必填）、`labels`（可选）、`projection_method`（可选，`umap|tsne|pca`）、`metric`（可选，`cosine|euclidean`）、`neighbors_k`（可选）、`point_size`（可选）
   - 返回：Projector 负载（`points`、`neighbors`、`projection_meta`）
+- `rerank_documents`
+  - 入参：`query`、`documents`（1–50 个非空字符串）、可选 `top_n`
+  - 返回：按分数降序的 vLLM Rerank 响应
 
 ### Resources
-- `qwen3embedding://health`：当前模型、端口、backend 就绪状态、默认 instruction 等
+- `qwen3embedding://health`：Embedding 顶层状态与嵌套 Reranker 状态
 - `qwen3embedding://usage`：MCP 工具参数说明与使用建议
 
 ### Prompts
 - `retrieval_embedding_workflow`：指导客户端如何区分 query/document，并在 query 侧传入 instruction
+- `rag_retrieval_workflow`：指导客户端先向量召回，再把不超过 50 条候选交给 Reranker
 - `projector_workflow`：指导客户端如何构建可视化聚类与近邻探索请求
 
 ## 架构说明
 - **对外端口**：`PORT=12302`
-- **容器内 vLLM**：默认监听 `127.0.0.1:8001`
-- **工作方式**：外层 FastAPI 接收请求，必要时注入 Qwen query instruction，然后转发给容器内 `vLLM` 子进程；当容器可见多张 GPU 且未显式启用 tensor/pipeline parallel 时，wrapper 会默认按“每张卡 1 个 vLLM 实例”启动，并在外层轮询分发请求
-- **自动下载**：首次启动若本地缓存不存在模型，`vLLM` 会自动从 Hugging Face 拉取 `MODEL_ID`
+- **Embedding vLLM**：`127.0.0.1:8001`
+- **Reranker vLLM**：`127.0.0.1:8002`
+- **启动/关闭**：按 Embedding → Reranker 启动，按 Reranker → Embedding 关闭；Reranker 重载不影响 Embedding
+- **GPU**：Compose 只暴露 `device_ids: ["0"]`，GPU 1 完全不可见
+- **自动下载**：首次启动会把两个模型缓存到挂载的 `/models`
 
 这意味着你通常只需要访问：
 
 ```text
 http://localhost:12302/v1/embeddings
+http://localhost:12302/v1/rerank
 ```
 
 无需直接访问容器内 `8001`。
@@ -156,12 +204,19 @@ http://localhost:12302/v1/embeddings
   - 字段：`inputs`、`labels`（可选）、`input_type`（可选）、`instruction`（可选）
   - 投影参数：`projection_method=umap|tsne|pca`、`metric=cosine|euclidean`、`neighbors_k`、`point_size`
   - 返回：`points`（3D 坐标 + 文本元数据）、`neighbors`、`projection_meta`、`usage`
+- `POST /v1/rerank`
+  - `query`：非空字符串
+  - `documents`：1–50 个非空字符串
+  - `top_n`：可选，范围 `1..len(documents)`；省略时返回全部
+  - `model` / `user`：可选；`model` 若提供必须等于当前服务模型
+  - 禁止额外字段；无效输入返回统一 400，未就绪返回 503，后端错误原样透传
 - `POST /mcp` / `GET /mcp`：MCP Streamable HTTP 入口
 - `GET /`：统一 Web 控制台；`GET /projector` 会跳转到其中的 Projector 页签
 - `GET /docs` / `GET /redoc`：交互式接口文档
 - `GET /openapi.json`：OpenAPI 规范 JSON
 - `GET /health`：健康检查与运行参数
 - `POST /admin/reload`：热重载模型（需 `x-admin-token`）
+- `POST /admin/reranker/reload`：独立重载 Reranker，仅接受 `model_revision` 和 `quantization=none|bitsandbytes`
 
 ## GitHub Workflow：自动构建发布镜像
 
@@ -184,7 +239,7 @@ http://localhost:12302/v1/embeddings
 ## Docker 部署示例
 ```bash
 docker run -d --name qwen3_embedding_openai \
-  --gpus all \
+  --gpus '"device=0"' \
   -p 12302:12302 \
   -e MODEL_ID="Qwen/Qwen3-Embedding-4B" \
   -e HF_HOME="/models" \
@@ -195,7 +250,7 @@ docker run -d --name qwen3_embedding_openai \
 如果你绕过本仓库、直接调用原生 `vllm serve` 启动 `Qwen3-Embedding-*`，请显式追加：
 
 ```bash
---hf_overrides '{"is_matryoshka": true}'
+--hf-overrides '{"is_matryoshka": true}'
 ```
 
 否则某些 vLLM 版本会把 `dimensions=1024` 这类请求误判为不支持，返回 HTTP 400。
@@ -219,31 +274,22 @@ curl -X POST http://localhost:12302/admin/reload \
   }'
 ```
 
-## 多 GPU 与选卡说明
-- `deploy.resources.reservations.devices.device_ids` 可以显式绑定宿主机 GPU
-- `NVIDIA_VISIBLE_DEVICES` 控制暴露宿主机哪一张卡给容器
-  - `"0"` -> 宿主机第 1 张卡
-  - `"1"` -> 宿主机第 2 张卡
-  - `"0,1"` -> 同时暴露两张卡
-- 如果只暴露一张卡，容器内 `vLLM` 会把它作为内部 `cuda:0` 使用，这是正常现象
-- 如果暴露多张卡，且没有显式设置 `--tensor-parallel-size` / `--pipeline-parallel-size`，服务默认会在每张可见 GPU 上各启动 1 个单卡 `vLLM` 实例，并在外层 FastAPI 轮询分发请求，适合做并发推理
-- 如果你想关闭这个默认行为、仍然只保留 1 个后端实例，可设置：
+独立重载 Reranker：
 
-```yaml
-AUTO_BACKEND_REPLICAS: "0"
+```bash
+curl -X POST http://localhost:12302/admin/reranker/reload \
+  -H "Content-Type: application/json" \
+  -H "x-admin-token: change-me" \
+  -d '{"quantization":"none"}'
 ```
 
-- 如果你想显式限制启动几个单卡副本，可设置：
+该接口不能在线提高显存比例、上下文长度或并发上限。
 
-```yaml
-BACKEND_REPLICA_COUNT: "2"
-```
+## GPU 绑定
 
-- 只有在你明确要让“单个 vLLM 实例跨多张卡切模型”时，才需要通过 `VLLM_EXTRA_ARGS` 手动追加 tensor/pipeline parallel。例如：
-
-```yaml
-VLLM_EXTRA_ARGS: "--tensor-parallel-size 2"
-```
+本项目的发布配置固定为单卡：Compose `device_ids: ["0"]` 且
+`AUTO_BACKEND_REPLICAS=0`。不要把 GPU 1 加入可见设备，也不要启用 tensor/pipeline parallel。
+容器内看到的 `cuda:0` 对应宿主机 GPU 0。
 
 ## Projector 说明
 - 前端采用 `Vite + Plotly`（目录：`frontend/`）
@@ -279,7 +325,7 @@ npm run build
 - `HF_HOME`：模型缓存目录
 - `DTYPE`：模型精度，默认 `float16`
 - `MAX_MODEL_LEN`：最大上下文长度，默认 `4096`
-- `GPU_MEMORY_UTILIZATION`：vLLM 显存利用率，默认 `0.72`
+- `GPU_MEMORY_UTILIZATION`：Embedding vLLM 显存预留比例；Compose 为保留 8192 上下文并与同卡 ASR/Reranker 共存固定为 `0.47`
 - `DEFAULT_QUERY_INSTRUCTION`：query 侧默认 instruction
 - `ADMIN_TOKEN`：热重载接口鉴权
 - `VLLM_EXTRA_ARGS`：透传额外 vLLM 参数
@@ -287,6 +333,15 @@ npm run build
 - `BACKEND_REPLICA_COUNT`：显式指定启动多少个单卡 vLLM 副本
 - `PROJECTOR_CACHE_TTL_SECONDS`：Projector 结果缓存 TTL（秒）
 - `PROJECTOR_CACHE_MAX_ITEMS`：Projector 缓存项上限
+- `RERANKER_MODEL_ID`：默认 `Qwen/Qwen3-Reranker-0.6B`
+- `RERANKER_MODEL_REVISION`：可选模型 revision
+- `RERANKER_BACKEND_PORT`：固定默认 `8002`
+- `RERANKER_DTYPE`：固定发布值 `float16`
+- `RERANKER_MAX_MODEL_LEN`：固定发布值 `2048`
+- `RERANKER_GPU_MEMORY_UTILIZATION`：FP16 初始值 `0.08`
+- `RERANKER_FALLBACK_GPU_MEMORY_UTILIZATION`：仅 FP16 启动失败时尝试 `0.085`
+- `RERANKER_QUANTIZED_GPU_MEMORY_UTILIZATION`：BitsAndBytes 4-bit 使用 `0.06`，保留 2048-token 上下文和单序列调度
+- `RERANKER_QUANTIZATION`：`none` 或 `bitsandbytes`
 
 注意：
 - 输出向量维度上限无需配置：服务会读取当前模型的 `config.json` 自动确定，并通过 `/health` 的 `max_dimensions` 返回（4B 为 `2560`）。热重载模型时也会重新解析。
@@ -295,8 +350,47 @@ npm run build
 
 ## 测试
 ```bash
-.venv/bin/python -m pytest --capture=no
+python -m pytest
+python -m compileall -q app.py embedding_service.py reranker_service.py service_health.py mcp_server.py projector_service.py
+cd frontend && npm install && npm run build
+docker compose config --quiet
+docker build -t qwen3-embedding-openai:reranker-candidate .
 ```
+
+## 显存与量化验收
+
+Reranker 的 2 GiB 门槛定义为：根 PID 及其全部 GPU 子进程在 NVML 中的
+`used_memory` 之和，100 ms 采样，所有场景峰值必须严格小于 2048 MiB。脚本应在 Docker
+宿主机执行，它会覆盖空载、单文档、50×约 512-token、接近 2048-token 和四个并发客户端：
+
+```bash
+python scripts/measure_reranker_vram.py \
+  --container qwen3_embedding_openai \
+  --base-url http://127.0.0.1:12302 \
+  --gpu-index 0
+```
+
+仅当 FP16 无法满足启动或显存门槛时才考虑 BitsAndBytes。先记录 FP16 基线，再切换候选并比较：
+
+```bash
+python scripts/evaluate_reranker_quantization.py \
+  --record-fp16-url http://127.0.0.1:12302 \
+  --baseline-file /tmp/reranker-fp16.json
+
+python scripts/evaluate_reranker_quantization.py \
+  --candidate-url http://127.0.0.1:12302 \
+  --baseline-file /tmp/reranker-fp16.json
+```
+
+门槛为 Top-1 一致率至少 95%，nDCG@10 与 MRR@10 的绝对下降均不超过 `0.0121`。
+
+当前 GPU 0 实机候选结果（2026-08-18）：
+
+- FP16 / `gpu_memory_utilization=0.08`：可启动，NVML 进程树五场景峰值 `2414 MiB`，显存门禁失败。
+- BitsAndBytes 4-bit / `gpu_memory_utilization=0.06`：峰值 `1976 MiB`，显存门禁通过。
+- 4-bit 对 FP16 的 Top-1 一致率 `95%`、MRR@10 下降 `0`，nDCG@10 绝对下降 `0.0120702`，低于 `0.0121` 上限。
+
+因此 BitsAndBytes 4-bit 同时通过显存与质量门禁，Compose 发布配置固定为 4-bit / `0.06`。
 
 ## License
 MIT License

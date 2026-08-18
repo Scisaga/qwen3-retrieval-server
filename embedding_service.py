@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 import httpx
 from huggingface_hub import hf_hub_download
+from process_utils import terminate_process_group
 
 MODEL_ID = os.getenv("MODEL_ID", "Qwen/Qwen3-Embedding-4B")
 MODEL_REVISION = os.getenv("MODEL_REVISION")
@@ -463,7 +464,9 @@ def _build_vllm_command(port: Optional[int] = None) -> list[str]:
         _settings.backend_host,
         "--port",
         str(port if port is not None else _settings.backend_port),
-        "--task",
+        "--runner",
+        "pooling",
+        "--convert",
         "embed",
         "--dtype",
         _settings.dtype,
@@ -479,7 +482,7 @@ def _build_vllm_command(port: Optional[int] = None) -> list[str]:
     if _env_flag("TRUST_REMOTE_CODE", "0"):
         command.append("--trust-remote-code")
     if _should_enable_qwen3_matryoshka_override(_settings.model_id, extra_args):
-        command.extend(["--hf_overrides", json.dumps({"is_matryoshka": True})])
+        command.extend(["--hf-overrides", json.dumps({"is_matryoshka": True})])
     if extra_tokens:
         command.extend(extra_tokens)
     return command
@@ -575,15 +578,7 @@ def _stop_backend_process_locked() -> None:
 
         if proc is None:
             continue
-        if proc.poll() is not None:
-            continue
-
-        proc.terminate()
-        try:
-            proc.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=10)
+        terminate_process_group(proc)
 
     _refresh_backend_summary_locked()
 

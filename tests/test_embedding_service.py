@@ -137,9 +137,13 @@ def test_build_vllm_command_auto_enables_qwen3_matryoshka(monkeypatch):
 
     command = embedding_service._build_vllm_command()
 
-    assert "--hf_overrides" in command
-    override_index = command.index("--hf_overrides")
+    assert "--hf-overrides" in command
+    override_index = command.index("--hf-overrides")
     assert command[override_index + 1] == '{"is_matryoshka": true}'
+    assert command[command.index("--runner") + 1] == "pooling"
+    assert command[command.index("--convert") + 1] == "embed"
+    assert "--task" not in command
+    assert "--disable-frontend-multiprocessing" not in command
 
 
 def test_build_vllm_command_does_not_duplicate_existing_hf_overrides(monkeypatch):
@@ -152,7 +156,7 @@ def test_build_vllm_command_does_not_duplicate_existing_hf_overrides(monkeypatch
 
     command = embedding_service._build_vllm_command()
 
-    assert command.count("--hf_overrides") == 1
+    assert sum(command.count(flag) for flag in ("--hf_overrides", "--hf-overrides")) == 1
 
 
 def test_build_vllm_command_leaves_non_qwen_models_unchanged(monkeypatch):
@@ -162,6 +166,7 @@ def test_build_vllm_command_leaves_non_qwen_models_unchanged(monkeypatch):
     command = embedding_service._build_vllm_command()
 
     assert "--hf_overrides" not in command
+    assert "--hf-overrides" not in command
 
 
 def test_build_backend_replicas_layout_uses_one_replica_per_visible_gpu(monkeypatch):

@@ -5,6 +5,7 @@ import asyncio
 from typing import Literal, Optional
 
 from fastapi import FastAPI, Header
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,13 +18,21 @@ from embedding_service import (
     InputValidationError,
     create_embeddings,
     get_current_model_id,
-    get_health_payload,
+    get_health_payload as get_embedding_health_payload,
     maybe_preload_backend,
     reload_backend,
     shutdown_backend,
 )
 from mcp_server import create_mcp_server
 from projector_service import ProjectorDependencyError, create_projector_payload
+from reranker_service import (
+    create_rerank,
+    get_current_reranker_model_id,
+    get_reranker_health_payload,
+    maybe_preload_reranker,
+    reload_reranker,
+    shutdown_reranker,
+)
 
 
 class EmbeddingsRequest(BaseModel):
@@ -48,6 +57,23 @@ class ReloadRequest(BaseModel):
     gpu_memory_utilization: Optional[float] = Field(default=None, gt=0.0, le=1.0)
     default_query_instruction: Optional[str] = None
     extra_args: Optional[str] = None
+
+
+class RerankRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    documents: list[str] = Field(min_length=1, max_length=50)
+    top_n: Optional[int] = Field(default=None, ge=1)
+    model: Optional[str] = None
+    user: Optional[str] = None
+
+
+class RerankerReloadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_revision: Optional[str] = None
+    quantization: Optional[Literal["none", "bitsandbytes"]] = None
 
 
 class ProjectorRequest(BaseModel):
@@ -81,6 +107,20 @@ def _authorize_admin(token: Optional[str]) -> None:
         raise PermissionError("Invalid x-admin-token.")
 
 
+async def get_health_payload() -> dict:
+    embedding = await get_embedding_health_payload()
+    reranker = await get_reranker_health_payload()
+    payload = dict(embedding)
+    payload["reranker"] = reranker
+    payload["status"] = "ok" if payload.get("backend_ready") and reranker.get("ready") else "degraded"
+    return payload
+
+
+async def _preload_backends() -> None:
+    await maybe_preload_backend()
+    await maybe_preload_reranker()
+
+
 def _build_index_html() -> str:
     template = """<!doctype html>
 <html lang="zh-CN">
@@ -91,7 +131,7 @@ def _build_index_html() -> str:
   <link rel="icon" type="image/png" href="/static/logo.png"/>
   <link rel="apple-touch-icon" href="/static/logo.png"/>
   <link rel="stylesheet" href="/projector-static/projector.css"/>
-  <title>Qwen3 Embedding</title>
+  <title>Qwen3 Embedding &amp; Reranker</title>
   <style>
     :root{
       --bg0:#050913;
@@ -240,6 +280,10 @@ def _build_index_html() -> str:
       border:1px solid var(--border);border-radius:var(--radius2);background:var(--panel);
       box-shadow:var(--shadow);overflow:hidden
     }
+    .rerank-results{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+    .rerank-result{border:1px solid var(--border);border-radius:10px;padding:12px;background:rgba(2,6,23,.38)}
+    .rerank-result-head{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:12px}
+    .rerank-result-text{margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
     .card,.metric,.kv-item,.sidebar-card{min-width:0}
     .card-body{padding:18px}
     .card-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin:0 0 14px}
@@ -754,15 +798,16 @@ def _build_index_html() -> str:
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <img class="logo" src="/static/logo.png" alt="Qwen3 Embedding"/>
+        <img class="logo" src="/static/logo.png" alt="Qwen3 Embedding and Reranker"/>
         <div>
-          <div class="brand-title">Qwen3 Embedding</div>
+          <div class="brand-title">Qwen3 Embedding &amp; Reranker</div>
           <div class="brand-sub">Self-hosted Debug Console</div>
         </div>
       </div>
 
       <nav class="nav" aria-label="主导航">
         <button type="button" class="nav-link active" data-tab="debug-section"><svg class="icon" aria-hidden="true"><use href="#i-embed"></use></svg><span>调试台</span></button>
+        <button type="button" class="nav-link" data-tab="reranker-section"><svg class="icon" aria-hidden="true"><use href="#i-results"></use></svg><span>Reranker</span></button>
         <button type="button" class="nav-link" data-tab="results-section"><svg class="icon" aria-hidden="true"><use href="#i-results"></use></svg><span>结果分析</span></button>
         <button type="button" class="nav-link" data-tab="projector-section"><svg class="icon" aria-hidden="true"><use href="#i-projector"></use></svg><span>Projector 视图</span></button>
         <button type="button" class="nav-link" data-tab="admin-section"><svg class="icon" aria-hidden="true"><use href="#i-admin"></use></svg><span>运维管理</span></button>
@@ -772,6 +817,7 @@ def _build_index_html() -> str:
 
       <div class="sidebar-footer" aria-label="运行信息">
         <div class="kv"><span class="k">Endpoint</span><span class="v">/v1/embeddings</span></div>
+        <div class="kv"><span class="k">Rerank</span><span class="v">/v1/rerank</span></div>
         <div class="kv"><span class="k">MCP</span><span class="v">/mcp</span></div>
         <div class="kv"><span class="k">Model</span><span class="v" id="sidebarModel">__MODEL_ID__</span></div>
         <div class="kv"><span class="k">Device</span><span class="v" id="sidebarDevice">cuda</span></div>
@@ -796,6 +842,7 @@ def _build_index_html() -> str:
       <div class="content">
         <nav class="mobile-nav" aria-label="移动端导航">
           <button type="button" class="mobile-tab active" data-tab="debug-section"><svg class="icon" aria-hidden="true"><use href="#i-embed"></use></svg>调试台</button>
+          <button type="button" class="mobile-tab" data-tab="reranker-section"><svg class="icon" aria-hidden="true"><use href="#i-results"></use></svg>Rerank</button>
           <button type="button" class="mobile-tab" data-tab="results-section"><svg class="icon" aria-hidden="true"><use href="#i-results"></use></svg>结果</button>
           <button type="button" class="mobile-tab" data-tab="projector-section"><svg class="icon" aria-hidden="true"><use href="#i-projector"></use></svg>Projector</button>
           <button type="button" class="mobile-tab" data-tab="admin-section"><svg class="icon" aria-hidden="true"><use href="#i-admin"></use></svg>运维</button>
@@ -926,6 +973,48 @@ def _build_index_html() -> str:
           </div>
         </section>
 
+        <section class="section tab-panel" id="reranker-section">
+          <div class="section-head">
+            <h2>Reranker 调试台</h2>
+            <p>对第一阶段召回的候选文档进行精排。每行一篇文档，最多 50 篇；instruction 与模板固定在服务端。</p>
+          </div>
+          <div class="grid">
+            <section class="card">
+              <div class="card-body">
+                <label for="rerankQuery">Query</label>
+                <input id="rerankQuery" value="中国的首都是哪里？"/>
+                <label for="rerankDocuments" style="margin-top:14px">Documents</label>
+                <textarea id="rerankDocuments" placeholder="每行一篇候选文档。">巴黎是法国的首都。\n北京是中华人民共和国的首都。\nPython 使用缩进表示代码块。</textarea>
+                <div class="row" style="margin-top:12px">
+                  <div>
+                    <label for="rerankTopN">Top N</label>
+                    <input id="rerankTopN" type="number" min="1" max="50" placeholder="留空返回全部"/>
+                  </div>
+                  <div>
+                    <label>固定模型</label>
+                    <input value="__RERANKER_MODEL_ID__" disabled/>
+                  </div>
+                </div>
+                <div class="actions">
+                  <button class="btn primary" id="rerankBtn"><svg class="icon" aria-hidden="true"><use href="#i-run"></use></svg>执行 Rerank</button>
+                </div>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-body">
+                <div class="card-title">
+                  <div><h3>排序结果</h3><p id="rerankMeta">尚未请求。</p></div>
+                </div>
+                <div class="rerank-results" id="rerankResults"></div>
+                <details class="payload-details" open>
+                  <summary><span>Rerank Response</span><span class="muted2">JSON</span></summary>
+                  <pre id="rerankRawOut">尚未请求。</pre>
+                </details>
+              </div>
+            </section>
+          </div>
+        </section>
+
         <section class="section tab-panel" id="results-section">
           <div class="grid">
             <section class="card">
@@ -1005,8 +1094,8 @@ def _build_index_html() -> str:
               <div class="card-body">
                 <div class="card-title">
                   <div>
-                    <h3>热重载表单</h3>
-                    <p>无需重启容器即可重载模型或调整关键运行参数。</p>
+                    <h3>Embedding 热重载</h3>
+                    <p>仅重启 Embedding 后端；Reranker 不受影响。</p>
                   </div>
                 </div>
 
@@ -1058,6 +1147,34 @@ def _build_index_html() -> str:
               </div>
             </section>
 
+            <section class="card">
+              <div class="card-body">
+                <div class="card-title">
+                  <div>
+                    <h3>Reranker 状态与热重载</h3>
+                    <p>只允许修改 revision 或在 FP16 / BitsAndBytes 4-bit 之间切换，显存与并发上限不可在线放宽。</p>
+                  </div>
+                </div>
+                <div class="row">
+                  <div>
+                    <label for="rerankerRevision">Model Revision</label>
+                    <input id="rerankerRevision" placeholder="留空保持当前 revision"/>
+                  </div>
+                  <div>
+                    <label for="rerankerQuantization">Quantization</label>
+                    <select id="rerankerQuantization">
+                      <option value="none">none / FP16</option>
+                      <option value="bitsandbytes">bitsandbytes 4-bit</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="actions">
+                  <button class="btn primary" id="rerankerReloadBtn"><svg class="icon" aria-hidden="true"><use href="#i-reload"></use></svg>重载 Reranker</button>
+                </div>
+                <pre id="rerankerReloadOut" style="margin-top:16px">尚未提交。</pre>
+              </div>
+            </section>
+
             <section class="card" id="api-section">
               <div class="card-body">
                 <div class="card-title">
@@ -1068,11 +1185,13 @@ def _build_index_html() -> str:
                 </div>
                 <ul class="api-list">
                   <li><code>POST /v1/embeddings</code><p>OpenAI 兼容 Embeddings 接口</p></li>
+                  <li><code>POST /v1/rerank</code><p>vLLM 兼容的二阶段文档精排接口</p></li>
                   <li><code>POST /v1/embeddings/projector</code><p>后端预计算 3D 投影 + 近邻，供 Projector 视图渲染</p></li>
                   <li><code>GET /</code><p>内置调试页面</p></li>
                   <li><code>GET /projector</code><p>兼容入口，跳转到主页 Projector 页签</p></li>
                   <li><code>POST/GET /mcp</code><p>MCP Streamable HTTP 入口</p></li>
                   <li><code>GET /health</code><p>运行状态与 backend 聚合健康</p></li>
+                  <li><code>POST /admin/reranker/reload</code><p>独立重载 Reranker</p></li>
                   <li><code>GET /docs</code> / <code>GET /redoc</code><p>Swagger 与 ReDoc 文档</p></li>
                 </ul>
               </div>
@@ -1087,6 +1206,7 @@ def _build_index_html() -> str:
     const REQUEST_TIMEOUT_MS = 20000;
     let lastHealthPayload = null;
     let lastEmbeddingPayload = null;
+    let lastRerankPayload = null;
 
     const templates = {
       blank: {
@@ -1182,11 +1302,23 @@ def _build_index_html() -> str:
       reloadExtraArgs: document.getElementById("reloadExtraArgs"),
       reloadBtn: document.getElementById("reloadBtn"),
       reloadOut: document.getElementById("reloadOut"),
+      rerankQuery: document.getElementById("rerankQuery"),
+      rerankDocuments: document.getElementById("rerankDocuments"),
+      rerankTopN: document.getElementById("rerankTopN"),
+      rerankBtn: document.getElementById("rerankBtn"),
+      rerankResults: document.getElementById("rerankResults"),
+      rerankMeta: document.getElementById("rerankMeta"),
+      rerankRawOut: document.getElementById("rerankRawOut"),
+      rerankerRevision: document.getElementById("rerankerRevision"),
+      rerankerQuantization: document.getElementById("rerankerQuantization"),
+      rerankerReloadBtn: document.getElementById("rerankerReloadBtn"),
+      rerankerReloadOut: document.getElementById("rerankerReloadOut"),
     };
     const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
     const tabControls = Array.from(document.querySelectorAll("[data-tab]"));
     const viewLabels = {
       "debug-section": "Embedding 调试台",
+      "reranker-section": "Reranker 调试台",
       "results-section": "结果分析",
       "projector-section": "Embedding Projector",
       "admin-section": "运维管理",
@@ -1232,7 +1364,7 @@ def _build_index_html() -> str:
         control.classList.toggle("active", isActive);
         control.setAttribute("aria-current", isActive ? "page" : "false");
       });
-      els.activeViewLabel.textContent = viewLabels[targetId] || "Qwen3 Embedding";
+      els.activeViewLabel.textContent = viewLabels[targetId] || "Qwen3 Embedding & Reranker";
 
       if (targetId === "projector-section") {
         void ensureProjectorMounted();
@@ -1525,10 +1657,15 @@ def _build_index_html() -> str:
           els.dimensions.removeAttribute("max");
           els.dimensions.title = "输出维度上限会从当前模型配置自动读取";
         }
-        const message = payload.backend_last_error || `Backend ${payload.backend_state || "unknown"}`;
-        if (payload.backend_ready) {
+        const reranker = payload.reranker || {};
+        if (reranker.quantization) els.rerankerQuantization.value = reranker.quantization;
+        const message = payload.backend_last_error || reranker.last_error || `Backend ${payload.backend_state || "unknown"}`;
+        if (payload.backend_ready && reranker.ready) {
           clearError();
-          setStatus("ok", "ready");
+          setStatus("ok", "embedding + reranker ready");
+        } else if (payload.backend_ready) {
+          showError(message || "Reranker 尚未就绪；Embedding 仍可使用。");
+          setStatus("warn", `embedding ready / reranker ${reranker.state || "not ready"}`);
         } else if (payload.backend_state === "starting") {
           showError(message);
           setStatus("warn", "starting / loading");
@@ -1660,6 +1797,100 @@ def _build_index_html() -> str:
       }
     }
 
+    function renderRerankResults(payload, latencyMs) {
+      const results = Array.isArray(payload?.results) ? payload.results : [];
+      els.rerankResults.replaceChildren();
+      results.forEach((item, rank) => {
+        const card = document.createElement("div");
+        card.className = "rerank-result";
+        const head = document.createElement("div");
+        head.className = "rerank-result-head";
+        const position = document.createElement("span");
+        position.textContent = `#${rank + 1} · 原始索引 ${item.index}`;
+        const score = document.createElement("strong");
+        score.textContent = `score ${Number(item.relevance_score).toFixed(6)}`;
+        head.append(position, score);
+        const text = document.createElement("div");
+        text.className = "rerank-result-text";
+        text.textContent = item?.document?.text || "";
+        card.append(head, text);
+        els.rerankResults.appendChild(card);
+      });
+      els.rerankMeta.textContent = `${results.length} 条结果 · ${latencyMs} ms · ${payload?.model || "-"}`;
+      els.rerankRawOut.textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function runRerank() {
+      const query = els.rerankQuery.value.trim();
+      const documents = splitTexts(els.rerankDocuments.value);
+      if (!query || !documents.length) {
+        showError("Reranker 需要非空 query 和至少一篇文档。");
+        return;
+      }
+      const payload = {query, documents};
+      if (els.rerankTopN.value.trim()) payload.top_n = Number(els.rerankTopN.value);
+      els.rerankBtn.disabled = true;
+      clearError();
+      setStatus("warn", "reranking");
+      const startedAt = performance.now();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const response = await fetch("/v1/rerank", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          els.rerankRawOut.textContent = JSON.stringify(result, null, 2);
+          showError(result?.error?.message || `Rerank failed with HTTP ${response.status}`);
+          setStatus("bad", "rerank failed");
+          return;
+        }
+        lastRerankPayload = result;
+        renderRerankResults(result, Math.round(performance.now() - startedAt));
+        setStatus("ok", "rerank completed");
+      } catch (error) {
+        showError(error?.name === "AbortError" ? "Rerank 请求超时。" : `Rerank 请求失败：${error}`);
+        setStatus("bad", "rerank failed");
+      } finally {
+        clearTimeout(timer);
+        els.rerankBtn.disabled = false;
+      }
+    }
+
+    async function submitRerankerReload() {
+      const payload = {quantization: els.rerankerQuantization.value};
+      if (els.rerankerRevision.value.trim()) payload.model_revision = els.rerankerRevision.value.trim();
+      els.rerankerReloadBtn.disabled = true;
+      els.rerankerReloadOut.textContent = "提交中...";
+      try {
+        const response = await fetch("/admin/reranker/reload", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-token": els.reloadToken.value.trim(),
+          },
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        els.rerankerReloadOut.textContent = JSON.stringify(result, null, 2);
+        if (!response.ok) {
+          showError(result?.error?.message || `Reranker reload failed with HTTP ${response.status}`);
+          return;
+        }
+        clearError();
+        await refreshHealth();
+      } catch (error) {
+        els.rerankerReloadOut.textContent = String(error);
+        showError(`Reranker reload 请求失败：${error}`);
+      } finally {
+        els.rerankerReloadBtn.disabled = false;
+      }
+    }
+
     els.applyTemplateBtn.addEventListener("click", () => applyTemplate(els.templateSelect.value));
     els.fillDemoBtn.addEventListener("click", () => applyTemplate("retrieval_pair"));
     els.healthBtn.addEventListener("click", refreshHealth);
@@ -1667,6 +1898,8 @@ def _build_index_html() -> str:
     els.copyJsonBtn.addEventListener("click", copyJson);
     els.downloadBtn.addEventListener("click", downloadJson);
     els.reloadBtn.addEventListener("click", submitReload);
+    els.rerankBtn.addEventListener("click", runRerank);
+    els.rerankerReloadBtn.addEventListener("click", submitRerankerReload);
     tabControls.forEach((control) => {
       control.addEventListener("click", () => {
         setActiveTab(control.dataset.tab || "debug-section");
@@ -1686,6 +1919,7 @@ def _build_index_html() -> str:
     return (
         template.replace("__MODEL_ID__", get_current_model_id())
         .replace("__DEFAULT_INSTRUCTION__", DEFAULT_QUERY_INSTRUCTION)
+        .replace("__RERANKER_MODEL_ID__", get_current_reranker_model_id())
     )
 
 
@@ -1698,7 +1932,7 @@ def create_application() -> FastAPI:
     async def lifespan(app: FastAPI):
         async with mcp.session_manager.run():
             preload_task: Optional[asyncio.Task] = None
-            preload_task = asyncio.create_task(maybe_preload_backend())
+            preload_task = asyncio.create_task(_preload_backends())
             try:
                 yield
             finally:
@@ -1706,9 +1940,19 @@ def create_application() -> FastAPI:
                     preload_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await preload_task
+                await shutdown_reranker()
                 await shutdown_backend()
 
-    app = FastAPI(title="Qwen3 Embedding", lifespan=lifespan)
+    app = FastAPI(title="Qwen3 Embedding & Reranker", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error(_, exc: RequestValidationError) -> JSONResponse:
+        first_error = exc.errors()[0] if exc.errors() else {}
+        location = ".".join(str(part) for part in first_error.get("loc", [])[1:])
+        message = first_error.get("msg", "Invalid request body.")
+        if location:
+            message = f"{location}: {message}"
+        return _error_response(message, 400, "invalid_request_error", 400)
     app.mount(
         "/static",
         StaticFiles(directory=os.path.join(app_root, "static")),
@@ -1734,6 +1978,20 @@ def create_application() -> FastAPI:
     async def embeddings(request: EmbeddingsRequest) -> JSONResponse:
         try:
             response_payload = await create_embeddings(request.model_dump(exclude_none=True))
+        except InputValidationError as exc:
+            return _error_response(str(exc), 400, "invalid_request_error", 400)
+        except BackendUnavailableError as exc:
+            return _error_response(str(exc), 503, "service_unavailable", 503)
+        except BackendProxyError as exc:
+            if exc.payload is not None:
+                return JSONResponse(exc.payload, status_code=exc.status_code)
+            return _error_response(str(exc), exc.status_code, "backend_error", exc.status_code)
+        return JSONResponse(response_payload)
+
+    @app.post("/v1/rerank")
+    async def rerank(request: RerankRequest) -> JSONResponse:
+        try:
+            response_payload = await create_rerank(request.model_dump(exclude_none=True))
         except InputValidationError as exc:
             return _error_response(str(exc), 400, "invalid_request_error", 400)
         except BackendUnavailableError as exc:
@@ -1776,6 +2034,22 @@ def create_application() -> FastAPI:
             return _error_response(str(exc), 503, "service_unavailable", 503)
         return JSONResponse(payload)
 
+    @app.post("/admin/reranker/reload")
+    async def admin_reranker_reload(
+        request: RerankerReloadRequest,
+        x_admin_token: Optional[str] = Header(default=None),
+    ) -> JSONResponse:
+        try:
+            _authorize_admin(x_admin_token)
+            payload = await reload_reranker(request.model_dump(exclude_none=True))
+        except PermissionError as exc:
+            return _error_response(str(exc), 401, "unauthorized", 401)
+        except InputValidationError as exc:
+            return _error_response(str(exc), 400, "invalid_request_error", 400)
+        except BackendUnavailableError as exc:
+            return _error_response(str(exc), 503, "service_unavailable", 503)
+        return JSONResponse(payload)
+
     @app.get("/openai-example", response_class=HTMLResponse)
     def openai_example() -> str:
         example = {
@@ -1784,6 +2058,8 @@ def create_application() -> FastAPI:
             "input": "hello world",
             "input_type": "query",
             "instruction": DEFAULT_QUERY_INSTRUCTION,
+            "reranker_model": get_current_reranker_model_id(),
+            "rerank_endpoint": "http://localhost:12302/v1/rerank",
         }
         return "<pre>" + json.dumps(example, ensure_ascii=False, indent=2) + "</pre>"
 

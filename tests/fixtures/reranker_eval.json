@@ -1,0 +1,22 @@
+[
+  {"query":"中国的首都是哪里？","documents":["上海是中国的重要金融中心。","北京是中华人民共和国的首都。","东京是日本首都。","长江流经多个省市。"],"relevance":{"1":3}},
+  {"query":"如何在 Python 中读取 JSON 文件？","documents":["使用 json.load 打开并解析文件对象。","CSS 用于网页样式。","git rebase 会重写提交历史。","JSON 是一种数据交换格式。"],"relevance":{"0":3,"3":1}},
+  {"query":"光合作用需要什么？","documents":["植物利用光能、水和二氧化碳合成有机物。","月球围绕地球运行。","水在标准气压下沸点约为 100 摄氏度。","叶绿体是光合作用的重要场所。"],"relevance":{"0":3,"3":2}},
+  {"query":"退款通常需要多久到账？","documents":["订单发货后可查看物流。","退款原路返回，通常需要三到五个工作日。","请修改账户密码。","会员积分年底清零。"],"relevance":{"1":3}},
+  {"query":"什么是向量数据库？","documents":["向量数据库用于存储向量并执行相似度检索。","关系数据库通过表组织结构化数据。","Reranker 对候选文档做精排。","GPU 擅长并行计算。"],"relevance":{"0":3,"2":1}},
+  {"query":"台风来临前如何准备？","documents":["关注预警，固定门窗并准备应急物资。","晴天适合户外运动。","海水含有盐分。","关闭不必要电源并避免外出。"],"relevance":{"0":3,"3":2}},
+  {"query":"RAG 为什么需要 reranker？","documents":["精排模型可重新评估召回候选与查询的相关性。","Embedding 用于第一阶段高效召回。","生成模型负责组织最终回答。","数据库需要定期备份。"],"relevance":{"0":3,"1":2}},
+  {"query":"What is the capital of France?","documents":["Berlin is the capital of Germany.","Paris is the capital of France.","France is in Europe.","Ottawa is the capital of Canada."],"relevance":{"1":3,"2":1}},
+  {"query":"How do I reset a forgotten password?","documents":["Click Forgot password and follow the email verification link.","Invoices are issued monthly.","Passwords should be unique.","Contact support if you no longer access the recovery email."],"relevance":{"0":3,"3":2}},
+  {"query":"Why is the sky blue?","documents":["Rayleigh scattering affects shorter blue wavelengths more strongly.","Clouds consist of water droplets.","Sunsets often look red.","The ocean contains dissolved salts."],"relevance":{"0":3,"2":1}},
+  {"query":"What does HTTP 404 mean?","documents":["It indicates that the requested resource was not found.","HTTP 500 signals a server-side error.","TLS encrypts network traffic.","DNS maps names to addresses."],"relevance":{"0":3}},
+  {"query":"Best way to keep bread fresh","documents":["Store it sealed and freeze portions for longer storage.","Bake bread at a high temperature.","Rice should be kept dry.","A bread knife has a serrated edge."],"relevance":{"0":3}},
+  {"query":"What is semantic search?","documents":["It retrieves items by meaning using representations such as embeddings.","Keyword search matches literal terms.","A reranker scores a candidate set more precisely.","Sorting numbers is a common algorithm task."],"relevance":{"0":3,"2":2,"1":1}},
+  {"query":"How should an API rate limit be handled?","documents":["Retry with exponential backoff and respect Retry-After.","Use a larger font size.","HTTP 429 indicates too many requests.","Delete the database and retry."],"relevance":{"0":3,"2":2}},
+  {"query":"Python sort a list descending","documents":["Use sorted(values, reverse=True).","Use values.append(item) to add an item.","A tuple is immutable.","list.pop removes an item."],"relevance":{"0":3}},
+  {"query":"JavaScript fetch JSON POST request","documents":["Call fetch with method POST, a JSON Content-Type header, and JSON.stringify body.","document.querySelector selects a DOM node.","JSON.parse decodes a JSON string.","CSS grid creates layouts."],"relevance":{"0":3,"2":1}},
+  {"query":"SQL find duplicate email addresses","documents":["GROUP BY email HAVING COUNT(*) > 1 returns duplicated emails.","ORDER BY sorts query results.","CREATE INDEX may speed up lookups.","TRUNCATE removes table rows."],"relevance":{"0":3}},
+  {"query":"Git undo the latest local commit but keep changes","documents":["Run git reset --soft HEAD~1 to keep changes staged.","git push uploads commits.","git clone copies a repository.","git status displays working tree state."],"relevance":{"0":3}},
+  {"query":"FastAPI validate request fields strictly","documents":["Use a Pydantic model with ConfigDict(extra='forbid').","Uvicorn is an ASGI server.","Path parameters are part of the URL.","HTTPX is an HTTP client."],"relevance":{"0":3}},
+  {"query":"Docker expose only GPU zero","documents":["Reserve device_ids ['0'] or set the equivalent NVIDIA device visibility.","Use port mappings to expose HTTP ports.","A volume persists model cache files.","GPU memory is measured in MiB."],"relevance":{"0":3}}
+]

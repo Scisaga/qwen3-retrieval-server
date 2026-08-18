@@ -13,6 +13,7 @@ def test_usage_resource_includes_projector_tool():
     assert "embed_text" in content
     assert "project_texts" in content
     assert "projection_method" in content
+    assert "rerank_documents" in content
 
 
 def test_health_resource_content_is_json():
@@ -21,6 +22,7 @@ def test_health_resource_content_is_json():
     assert isinstance(payload, dict)
     assert "model_id" in payload
     assert "backend_ready" in payload
+    assert "reranker" in payload
 
 
 @pytest.mark.anyio
@@ -72,12 +74,25 @@ async def test_project_texts_impl_accepts_single_string(monkeypatch):
     assert call_payload["neighbors_k"] == 8
 
 
+@pytest.mark.anyio
+async def test_rerank_documents_impl(monkeypatch):
+    mocked = AsyncMock(return_value={"id": "r1", "results": [{"index": 0, "relevance_score": 0.8}]})
+    monkeypatch.setattr(mcp_server, "rerank_documents_service", mocked)
+
+    payload = await mcp_server.rerank_documents_impl("query", ["document"], top_n=1)
+
+    assert payload["id"] == "r1"
+    mocked.assert_awaited_once_with(query="query", documents=["document"], top_n=1)
+
+
 def test_fastapi_mcp_mount(monkeypatch):
     async def _noop():
         return None
 
     monkeypatch.setattr(app, "maybe_preload_backend", _noop)
+    monkeypatch.setattr(app, "maybe_preload_reranker", _noop)
     monkeypatch.setattr(app, "shutdown_backend", _noop)
+    monkeypatch.setattr(app, "shutdown_reranker", _noop)
 
     with TestClient(app.create_application()) as client:
         response = client.get("/mcp", follow_redirects=False)
