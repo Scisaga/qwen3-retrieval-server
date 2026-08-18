@@ -12,10 +12,6 @@ GPU 0，公共入口仍为 `:12302`；项目不包含向量库、切块或生成
 
 ![Embedding 工作台](img/qwen3-retrieval-embedding.png)
 
-![Reranker 工作台](img/qwen3-retrieval-reranker.png)
-
-![服务与模型](img/qwen3-retrieval-services.png)
-
 ## 功能
 - OpenAI 兼容 Embeddings API：`POST /v1/embeddings`
 - vLLM 兼容 Rerank API：`POST /v1/rerank`（1–50 篇纯文本文档）
